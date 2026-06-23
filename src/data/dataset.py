@@ -10,7 +10,7 @@ Expected data layout after download:
       Kvasir/images/*.png   Kvasir/masks/*.png
       CVC-ClinicDB/images/*.png   CVC-ClinicDB/masks/*.png
       CVC-ColonDB/images/*.png    CVC-ColonDB/masks/*.png
-      ETIS-Larib/images/*.png     ETIS-Larib/masks/*.png
+      ETIS-LaribPolypDB/images/*.png  ETIS-LaribPolypDB/masks/*.png
       CVC-300/images/*.png        CVC-300/masks/*.png
 
 This follows the PraNet / Polyp-PVT standard protocol exactly.
@@ -32,7 +32,7 @@ _DATASET_DIR = {
     "kvasir": "Kvasir",
     "cvc_clinicdb": "CVC-ClinicDB",
     "cvc_colondb": "CVC-ColonDB",
-    "etis_larib": "ETIS-Larib",
+    "etis_larib": "ETIS-LaribPolypDB",
     "cvc_300": "CVC-300",
 }
 
