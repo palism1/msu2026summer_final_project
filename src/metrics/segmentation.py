@@ -102,8 +102,9 @@ def e_measure(pred: np.ndarray, gt: np.ndarray, eps: float = 1e-6) -> float:
     mu_g = gt.mean()
     align_p = 2 * pred - mu_p
     align_g = 2 * gt - mu_g
-    align_mat = 4 * (align_p * align_g) / (align_p ** 2 + align_g ** 2 + eps)
-    return align_mat.mean()
+    # 2ab/(a²+b²) ∈ [-1,1] per pixel; equals 1 when a=b (perfect alignment)
+    align_mat = 2 * (align_p * align_g) / (align_p ** 2 + align_g ** 2 + eps)
+    return float(np.clip(align_mat.mean(), 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
