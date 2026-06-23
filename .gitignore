@@ -1,0 +1,13 @@
+/data/
+/checkpoints/
+runs/
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+.env
+*.pt
+*.pth
+wandb/

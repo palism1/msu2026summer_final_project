@@ -1,0 +1,61 @@
+data:
+  root: data/polyp
+  img_size: 352
+  num_workers: 4
+  splits:
+    kvasir:
+      n_train: 900
+      n_test: 100
+    cvc_clinicdb:
+      n_train: 550
+      n_test: 62
+  unseen_datasets:
+    - cvc_colondb    # 380 images
+    - etis_larib     # 196 images
+    - cvc_300        # 60 images
+
+training:
+  batch_size: 16
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw
+  scheduler: cosine
+  loss: dice_bce       # combined Dice + BCE
+  early_stop_patience: 10
+  seed: 42
+  n_runs: 3            # report mean ± std over 3 seeds
+  val_freq: 1
+
+model:
+  name: unet
+  encoder: resnet34
+  encoder_weights: imagenet
+
+sam:
+  model_type: vit_h    # primary; swap to vit_l or vit_b for ablations
+  checkpoint: sam_vit_h_4b8939.pth
+  lora_r: 4
+  lora_alpha: 8
+  lora_dropout: 0.1
+  target_modules:      # which SAM attention projections get LoRA
+    - q_proj
+    - v_proj
+
+medsam:
+  model_type: vit_b
+  checkpoint: medsam_vit_b.pth
+  lora_r: 4
+  lora_alpha: 8
+  lora_dropout: 0.1
+
+sam2:
+  model_cfg: sam2_hiera_large.yaml
+  checkpoint: sam2_hiera_large.pt
+  lora_r: 4
+  lora_alpha: 8
+  lora_dropout: 0.1
+
+inference:
+  threshold: 0.5
+  tta: false           # test-time augmentation (horizontal flip ensemble)
