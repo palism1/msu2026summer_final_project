@@ -120,7 +120,11 @@ class SAMLoRA(nn.Module):
         # inject LoRA into Q and V projections of each attention block
         self._inject_lora(lora_r, lora_alpha, lora_dropout)
 
-        embed_dim = self.encoder.neck[-1].out_channels  # typically 256 for ViT-H
+        embed_dim = next(
+            m.out_channels
+            for m in reversed(list(self.encoder.neck.children()))
+            if isinstance(m, nn.Conv2d)
+        )
         self.decoder = LightDecoder(in_channels=embed_dim, img_size=img_size)
 
     def _inject_lora(self, r: int, alpha: float, dropout: float):
