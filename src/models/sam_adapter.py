@@ -117,6 +117,10 @@ class SAMLoRA(nn.Module):
         for p in self.encoder.parameters():
             p.requires_grad_(False)
 
+        # SAM pos_embed is sized for 1024×1024 (64×64 patch grid).
+        # Interpolate to our training resolution so x + pos_embed doesn't shape-mismatch.
+        self._resize_pos_embed(img_size)
+
         # inject LoRA into Q and V projections of each attention block
         self._inject_lora(lora_r, lora_alpha, lora_dropout)
 
@@ -126,6 +130,22 @@ class SAMLoRA(nn.Module):
             if isinstance(m, nn.Conv2d)
         )
         self.decoder = LightDecoder(in_channels=embed_dim, img_size=img_size)
+
+    def _resize_pos_embed(self, img_size: int) -> None:
+        pe = self.encoder.pos_embed
+        if pe is None:
+            return
+        h = w = img_size // 16  # SAM always uses patch_size=16
+        if pe.shape[1] == h and pe.shape[2] == w:
+            return
+        # pe: (1, H_orig, W_orig, C) — permute to NCHW for interpolate, then back
+        pe_resized = nn.functional.interpolate(
+            pe.permute(0, 3, 1, 2).float(),
+            size=(h, w),
+            mode="bicubic",
+            align_corners=False,
+        ).permute(0, 2, 3, 1)
+        self.encoder.pos_embed = nn.Parameter(pe_resized, requires_grad=False)
 
     def _inject_lora(self, r: int, alpha: float, dropout: float):
         for module in self.encoder.modules():
