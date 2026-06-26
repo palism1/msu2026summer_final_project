@@ -145,6 +145,32 @@ class SAMLoRA(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
 
+def build_medsam_lora(
+    medsam_checkpoint: str,
+    lora_r: int = 4,
+    lora_alpha: float = 8.0,
+    lora_dropout: float = 0.1,
+    img_size: int = 352,
+    device: str = "cuda",
+) -> SAMLoRA:
+    """
+    Load MedSAM (SAM ViT-B fine-tuned on SA-Med2D-20M by Ma et al. 2024)
+    and wrap it with LoRA + a lightweight decoder.
+
+    MedSAM shares the exact SAM ViT-B architecture; only the weights differ.
+    Checkpoint: wget https://huggingface.co/bowang-lab/MedSAM/resolve/main/medsam_vit_b.pth
+    """
+    return build_sam_lora(
+        sam_checkpoint=medsam_checkpoint,
+        model_type="vit_b",
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        img_size=img_size,
+        device=device,
+    )
+
+
 def build_sam_lora(
     sam_checkpoint: str,
     model_type: str = "vit_h",
