@@ -11,3 +11,4 @@ dist/
 *.pt
 *.pth
 wandb/
+HANDOFF.md

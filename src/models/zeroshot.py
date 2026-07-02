@@ -58,7 +58,8 @@ def point_from_mask(mask: np.ndarray) -> Optional[np.ndarray]:
 
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-x))
+    # clip so np.exp can't overflow on confident background logits (prob still saturates to 0/1)
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -60.0, 60.0)))
 
 
 # ---------------------------------------------------------------------------
