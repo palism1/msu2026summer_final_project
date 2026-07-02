@@ -25,24 +25,33 @@ We compare:
 ```
 .
 ├── configs/
-│   └── base.yaml              # All hyperparameters
+│   ├── base.yaml              # Shared hyperparameters
+│   └── run.yaml               # Per-run overrides: selects model / seed / outputs
 ├── src/
+│   ├── config.py             # Config load/merge + run-plan resolution (torch-free)
 │   ├── data/
 │   │   ├── dataset.py         # PolypDataset + PraNet split builder
 │   │   └── transforms.py      # Albumentations train/val pipelines
 │   ├── metrics/
 │   │   └── segmentation.py    # mDice, mIoU, MAE, wFm, Sm, Em
-│   └── models/
-│       ├── unet.py            # U-Net via segmentation-models-pytorch
-│       └── sam_adapter.py     # SAM + LoRA + lightweight decoder
+│   ├── models/
+│   │   ├── unet.py            # U-Net via segmentation-models-pytorch
+│   │   └── sam_adapter.py     # SAM + LoRA + lightweight decoder
+│   └── training/
+│       ├── engine.py          # Config-driven training loop (all models)
+│       └── reporting.py       # Writes metrics.json, mask overlays, run.log
 ├── notebooks/
-│   ├── 01_data_pipeline.ipynb     <- Phase 1 (start here)
-│   ├── 02_unet_baseline.ipynb     <- Phase 2
-│   └── 03_sam_lora.ipynb          <- Phase 3
+│   ├── 01_data_pipeline.ipynb     # Download data, verify splits (run once)
+│   ├── train_colab.ipynb          # Colab wrapper: edit configs/run.yaml, runs train.py
+│   └── 05_benchmark.ipynb         # Compare all trained models side by side
 ├── train.py                   # CLI training entry point
 ├── evaluate.py                # CLI evaluation (all 5 splits)
 └── requirements.txt
 ```
+
+> The per-model training notebooks (`02_unet_baseline`, `03_sam_lora`, `04_medsam_lora`) were
+> superseded by the config-driven runner (`train.py`) and are preserved on the
+> `backup/per-model-notebooks` branch rather than kept on `main`.
 
 ---
 
@@ -62,10 +71,10 @@ Training split: 900 Kvasir + 550 CVC-ClinicDB = 1,450 images
 
 ## Quick Start (Google Colab)
 
-1. Open `notebooks/01_data_pipeline.ipynb` in Colab. It installs deps, clones the repo, downloads Kvasir-SEG, and verifies the pipeline end-to-end.
-2. Set `GDRIVE_FILE_ID` in that notebook (from PraNet's GitHub README) to fetch all five datasets.
-3. Open `notebooks/02_unet_baseline.ipynb` to train the U-Net baseline (free T4 GPU).
-4. Open `notebooks/03_sam_lora.ipynb` to train SAM-LoRA (A100/L4 recommended for ViT-H).
+1. Open `notebooks/01_data_pipeline.ipynb` in Colab. It installs deps, clones the repo, downloads the datasets, and verifies the splits end-to-end (run once).
+2. Choose what to train by editing `run.model` in `configs/run.yaml` (`unet` | `sam_lora` | `medsam`), then commit and push.
+3. Open `notebooks/train_colab.ipynb` and run its three cells: it fetches the data plus the one checkpoint your config needs and runs `train.py` under a single shared protocol. Results land in `results/<model>/seed<seed>/` and mirror to Drive.
+4. Open `notebooks/05_benchmark.ipynb` to compare all trained models side by side.
 
 ---
 
@@ -83,8 +92,11 @@ All metrics match the PraNet evaluation protocol:
 ## CLI Usage
 
 ```bash
-# Train U-Net baseline
-python train.py --config configs/base.yaml --model unet --seed 42
+# Train the model selected in configs/run.yaml (unet | sam_lora | medsam)
+python train.py --config configs/run.yaml
+
+# Offline sanity check — no GPU or torch required
+python train.py --config configs/run.yaml --dry-run
 
 # Evaluate all 5 splits
 python evaluate.py --config configs/base.yaml --model unet \
