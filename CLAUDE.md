@@ -28,5 +28,6 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 - `notebooks/02–04` — per-model exploration; superseded by `train.py` and preserved on the `backup/per-model-notebooks` branch (not on `main`).
 
 ## Pointers
+- **Plan & where to pick up (start here when resuming):** `docs/PROJECT_PLAN.md`
 - **Design decisions & rationale:** `docs/DECISIONS.md`
 - **Project overview, datasets, CLI:** `README.md`
