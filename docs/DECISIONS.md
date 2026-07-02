@@ -71,4 +71,5 @@ Extracted the training loop (duplicated across notebooks 02/03/04) into one runn
 `configs/run.yaml`, so every model trains under an identical protocol on the same GPU. Each
 run records accuracy, trainable/total params, checkpoint download size, device, and per-epoch
 + total wall-clock time into `metrics.json` — making the accuracy-vs-cost / simpler-machine
-tradeoff measurable. Notebooks 02–05 kept as historical exploration. (`train.py`, `src/config.py`, `src/training/`)
+tradeoff measurable. Notebooks 01 and 05 stay on `main`; the superseded per-model training
+notebooks 02–04 are preserved on the `backup/per-model-notebooks` branch. (`train.py`, `src/config.py`, `src/training/`)

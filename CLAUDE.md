@@ -25,7 +25,7 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 - `configs/base.yaml` — shared hyperparameters. `configs/run.yaml` — per-run overrides + outputs.
 - Checkpoints: `checkpoints/<model>/seed<seed>/best.pt` (best-val-Dice only; **[DO NOT TOUCH]** path contract).
 - Results: `results/<model>/seed<seed>/` (metrics.json, mask overlays, run.log); mirrored to Drive.
-- `notebooks/02–04` — historical per-model exploration (superseded by `train.py` as the canonical runner).
+- `notebooks/02–04` — per-model exploration; superseded by `train.py` and preserved on the `backup/per-model-notebooks` branch (not on `main`).
 
 ## Pointers
 - **Design decisions & rationale:** `docs/DECISIONS.md`
