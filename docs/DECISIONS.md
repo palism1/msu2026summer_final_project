@@ -73,3 +73,13 @@ run records accuracy, trainable/total params, checkpoint download size, device, 
 + total wall-clock time into `metrics.json` — making the accuracy-vs-cost / simpler-machine
 tradeoff measurable. Notebooks 01 and 05 stay on `main`; the superseded per-model training
 notebooks 02–04 are preserved on the `backup/per-model-notebooks` branch. (`train.py`, `src/config.py`, `src/training/`)
+
+### Zero-shot vanilla SAM/MedSAM baselines — GT-box prompted — 2026-07-02 [TWEAK protocol]
+The "without fine-tuning" half of the comparison. SAM and MedSAM are promptable and cannot segment a
+polyp from an image alone, so the vanilla baselines are prompted by the **bounding box of the GT mask**
+(padded a few px) — the standard medical-SAM setup, and MedSAM is box-prompt-trained. This is an
+ORACLE prompt (it reveals roughly where the polyp is) while the fine-tuned models get no hint; state
+that asymmetry when comparing. Protocol is swappable (`ZS_PROMPT` = `box` | `point`, `ZS_BOX_PAD`) at
+the top of the model-build cell in `05_benchmark.ipynb`; the pure prompt-derivation math is GPU-free
+and unit-tested. `src/models/__init__.py` was made lazy (PEP 562) so importing `box_from_mask` for a
+torch-free test does not drag in torch. (`src/models/zeroshot.py`, `tests/test_zeroshot.py`, `notebooks/05_benchmark.ipynb`)
