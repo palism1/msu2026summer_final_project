@@ -55,6 +55,19 @@ def test_run_config_merges_base(base_cfg):
     assert plan.local_results_dir == "results/medsam/seed7"
     assert plan.drive_results_dir == "/drive/results/medsam/seed7"
     assert plan.overlay_splits == ["seen_kvasir"]
+    # No drive_checkpoint_dir override in this config -> falls back to the default root.
+    assert plan.drive_checkpoint_dir == "/content/drive/MyDrive/msu2026_checkpoints/medsam/seed7"
+
+
+def test_drive_checkpoint_dir_override(base_cfg):
+    _write(base_cfg, "run.yaml", """
+        base_config: base.yaml
+        run: {model: medsam, seed: 7}
+        output: {drive_checkpoint_dir: /drive/my_checkpoints}
+    """)
+    cfg = load_run_config(base_cfg / "run.yaml")
+    plan = build_run_plan(cfg)
+    assert plan.drive_checkpoint_dir == "/drive/my_checkpoints/medsam/seed7"
 
 
 def test_sam_checkpoint_name_encodes_backbone(base_cfg):

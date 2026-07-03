@@ -3,6 +3,8 @@
 #     - results/<model>/seed<seed>/metrics.json   (accuracy + efficiency: params, ckpt size, timing)
 #     - results/<model>/seed<seed>/overlay_*.png  (sample image / GT / prediction panels)
 #     - results/<model>/seed<seed>/run.log        (full stdout tee)
+#   Also mirrors the best checkpoint (checkpoints/<model>/seed<seed>/best.pt) to Drive via
+#   mirror_checkpoint_to_drive, both periodically (engine.py callback) and once at the end.
 #   matplotlib/PIL are imported lazily so importing this module stays cheap. [TWEAK] overlay
 #   styling and the metrics payload shape are safe to extend.
 """Evaluation, metric aggregation, mask-overlay rendering, run logging, and Drive mirroring."""
@@ -225,12 +227,15 @@ def save_mask_overlays(model, splits, plan, device, out_dir: str | Path) -> list
 # Drive mirror
 # ---------------------------------------------------------------------------
 
-def mirror_to_drive(local_dir: str | Path, drive_dir: str | Path) -> bool:
+def drive_available(drive_dir: str | Path) -> bool:
     """
-    Copy the local results folder to the Drive results path, if Drive is mounted.
+    True if the Drive mount root for ``drive_dir`` is present (or no mount root applies).
 
-    Guarded like the existing checkpoint-backup cells: only mirrors when the Drive mount root
-    (e.g. /content/drive/MyDrive) actually exists, so local/offline runs are a no-op.
+    Walks ``drive_dir``'s parents looking for a directory ending in "MyDrive" or named
+    "drive" (the Colab mount point). If no such parent exists in the path at all, there's
+    nothing to guard against, so this returns True. If found but missing on disk, Drive
+    isn't mounted (e.g. a local/offline run) and this returns False. Callers decide what,
+    if anything, to print.
     """
     drive_dir = Path(drive_dir)
     mount_root = None
@@ -239,9 +244,47 @@ def mirror_to_drive(local_dir: str | Path, drive_dir: str | Path) -> bool:
             mount_root = parent
             break
     if mount_root is not None and not mount_root.exists():
+        return False
+    return True
+
+
+def mirror_to_drive(local_dir: str | Path, drive_dir: str | Path) -> bool:
+    """
+    Copy the local results folder to the Drive results path, if Drive is mounted.
+
+    Guarded like the existing checkpoint-backup cells: only mirrors when the Drive mount root
+    (e.g. /content/drive/MyDrive) actually exists, so local/offline runs are a no-op.
+    """
+    drive_dir = Path(drive_dir)
+    if not drive_available(drive_dir):
+        mount_root = next(
+            (p for p in drive_dir.parents if str(p).endswith("MyDrive") or p.name == "drive"), None
+        )
         print(f"Drive not mounted ({mount_root} missing) — skipping Drive mirror.")
         return False
     drive_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(local_dir, drive_dir, dirs_exist_ok=True)
     print(f"Mirrored results -> {drive_dir}")
+    return True
+
+
+def mirror_checkpoint_to_drive(checkpoint_path: str | Path, drive_checkpoint_dir: str | Path) -> bool:
+    """
+    Copy a single checkpoint file to the Drive checkpoint dir, if present and Drive is mounted.
+
+    No-op (with a printed skip message) when the checkpoint doesn't exist yet or Drive isn't
+    mounted — safe to call periodically during training and again at the end of a run.
+    """
+    checkpoint_path = Path(checkpoint_path)
+    drive_checkpoint_dir = Path(drive_checkpoint_dir)
+    if not checkpoint_path.exists():
+        print(f"Checkpoint not found ({checkpoint_path}) — skipping Drive checkpoint mirror.")
+        return False
+    if not drive_available(drive_checkpoint_dir):
+        print(f"Drive not mounted — skipping Drive checkpoint mirror of {checkpoint_path}.")
+        return False
+    drive_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    dest = drive_checkpoint_dir / checkpoint_path.name
+    shutil.copy2(checkpoint_path, dest)
+    print(f"Mirrored checkpoint -> {dest}")
     return True

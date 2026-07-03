@@ -70,10 +70,13 @@ Every requirement is implemented. The last two now just need a GPU run to produc
 
 Everything below needs a GPU; no more code changes are required.
 
-1. **Train U-Net** — `configs/run.yaml` → `run.model: unet`; commit + push; run `train_colab.ipynb` (T4 OK).
-2. **Train fine-tuned MedSAM ViT-B** — `run.model: medsam`; commit + push; run (T4 OK).
-3. **Train fine-tuned SAM ViT-H** — `run.model: sam_lora`; commit + push; run (L4 / A100).
-4. **Run the benchmark** — `notebooks/05_benchmark.ipynb` on an L4/A100 (it loads a second ViT-H for
+1. **Train all three models in one Colab session** — open `notebooks/train_colab.ipynb`, set
+   `MODELS`/`SEED`/`EPOCHS` in **cell 1** (no `run.yaml` edits, no commit/push), Run all.
+   U-Net + MedSAM fit a T4; SAM ViT-H wants an L4/A100 — either run everything on an L4, or run
+   `['unet', 'medsam']` on a T4 first and `['sam_lora']` on an L4 later (the notebook skips
+   models that already finished; checkpoints + results are auto-mirrored to Drive during training,
+   so a disconnect never loses a completed run).
+2. **Run the benchmark** — `notebooks/05_benchmark.ipynb` on an L4/A100 (it loads a second ViT-H for
    zero-shot, ~2.5 GB extra VRAM). Out comes the full five-model comparison and the accuracy-vs-cost story.
 
 The vanilla SAM/MedSAM baselines need **no training** — the benchmark downloads the base weights and
@@ -95,9 +98,10 @@ since it defines what the "without fine-tuning" numbers mean.
 
 ## How to run (reference)
 
-**Train one model:** edit `configs/run.yaml` (`run.model`, `seed`, `epochs`, `output.drive_results_dir`)
-→ **commit and push** (the Colab cell does `git reset --hard origin/main`, so un-pushed edits are wiped)
-→ open `train_colab.ipynb`, pick the GPU, run 3 cells. Offline check: `python train.py --config configs/run.yaml --dry-run`.
+**Train (Colab):** open `train_colab.ipynb`, set `MODELS` / `SEED` / `EPOCHS` in cell 1, Run all.
+Already-trained models are restored from Drive and skipped; new checkpoints/results are mirrored to
+Drive automatically. **Train (local CLI):** `python train.py --config configs/run.yaml --model M`.
+Offline check: `python train.py --config configs/run.yaml --dry-run`.
 
 **Compare models:** once the three checkpoints exist, run `notebooks/05_benchmark.ipynb`.
 
