@@ -16,14 +16,16 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 
 ## Run order
 1. `notebooks/01_data_pipeline.ipynb` — download data, verify splits (run once).
-2. Train: `python train.py --config configs/run.yaml` (locally) or `notebooks/train_colab.ipynb`
-   (Colab 3-cell wrapper; edit `configs/run.yaml` to pick the model).
+2. Train: `notebooks/train_colab.ipynb` (Colab; pick models/seed/epochs in **cell 1** — trains all
+   selected models in one session, skips already-trained ones, mirrors checkpoints + results to
+   Drive) or locally: `python train.py --config configs/run.yaml [--model M]`.
    Sanity check offline: `python train.py --config configs/run.yaml --dry-run`.
 3. `notebooks/05_benchmark.ipynb` — compare results across models.
 
 ## Where things live
 - `configs/base.yaml` — shared hyperparameters. `configs/run.yaml` — per-run overrides + outputs.
-- Checkpoints: `checkpoints/<model>/seed<seed>/best.pt` (best-val-Dice only; **[DO NOT TOUCH]** path contract).
+- Checkpoints: `checkpoints/<model>/seed<seed>/best.pt` (best-val-Dice only; **[DO NOT TOUCH]** path
+  contract); auto-mirrored to Drive under `msu2026_checkpoints/<model>/seed<seed>/` during training.
 - Results: `results/<model>/seed<seed>/` (metrics.json, mask overlays, run.log); mirrored to Drive.
 - `notebooks/02–04` — per-model exploration; superseded by `train.py` and preserved on the `backup/per-model-notebooks` branch (not on `main`).
 

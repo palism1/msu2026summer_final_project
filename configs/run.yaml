@@ -18,6 +18,7 @@ output:
   checkpoint_dir: checkpoints                                        # [DO NOT TOUCH] best.pt lives here
   local_results_dir: results                                         # [TWEAK] local metrics/overlays/log
   drive_results_dir: /content/drive/MyDrive/msu2026_checkpoints/results  # [CHANGE ME] your Drive results path
+  drive_checkpoint_dir: /content/drive/MyDrive/msu2026_checkpoints  # [CHANGE ME] your Drive checkpoint root; benchmark nb 05 reads this layout
   n_overlay_samples: 8                                               # [TWEAK] overlays saved per split
   overlay_splits:                                                    # [TWEAK] which splits to sample
     - seen_kvasir

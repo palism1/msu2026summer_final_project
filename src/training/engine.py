@@ -116,6 +116,10 @@ class EngineDeps:
     build_dataloaders: Callable = default_build_dataloaders
     tracker_factory: Callable = default_tracker_factory
     loss_fn: Callable = dice_bce_loss
+    # Optional hook invoked with the checkpoint path (str) right after each best-checkpoint
+    # save, e.g. to mirror it to Drive. A failure here must never kill training — see the
+    # try/except around its call in run_training().
+    on_best_checkpoint: Optional[Callable] = None
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +221,11 @@ def run_training(plan: RunPlan, cfg: dict, deps: Optional[EngineDeps] = None):
             patience_count = 0
             torch.save(model.state_dict(), ckpt_dir / "best.pt")
             print(f"  new best dice={best_dice:.4f} -> checkpoint saved")
+            if deps.on_best_checkpoint is not None:
+                try:
+                    deps.on_best_checkpoint(str(ckpt_dir / "best.pt"))
+                except Exception as exc:  # a Drive hiccup must never kill a run
+                    print(f"  on_best_checkpoint callback failed (continuing): {exc}")
         else:
             patience_count += 1
             if patience_count >= plan.patience:

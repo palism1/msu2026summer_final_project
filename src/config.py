@@ -20,6 +20,7 @@ PIPELINE_STAGES = ("data pipeline", "model build", "train", "evaluate", "benchma
 MODEL_CHOICES = ("unet", "sam_lora", "medsam")
 
 _DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
+_DEFAULT_DRIVE_CHECKPOINTS = "/content/drive/MyDrive/msu2026_checkpoints"
 _DEFAULT_OVERLAY_SPLITS = ("seen_kvasir", "cvc_colondb")
 
 
@@ -95,6 +96,7 @@ class RunPlan:
     checkpoint_dir: str
     local_results_dir: str
     drive_results_dir: str
+    drive_checkpoint_dir: str
     n_overlay_samples: int
     overlay_splits: list[str] = field(default_factory=list)
 
@@ -161,6 +163,7 @@ def build_run_plan(cfg: dict, overrides: Optional[dict] = None) -> RunPlan:
     ckpt_base = overrides.get("output_dir") or output.get("checkpoint_dir", "checkpoints")
     local_base = output.get("local_results_dir", "results")
     drive_base = output.get("drive_results_dir", _DEFAULT_DRIVE_RESULTS)
+    drive_ckpt_base = output.get("drive_checkpoint_dir", _DEFAULT_DRIVE_CHECKPOINTS)
 
     overlay_splits = list(output.get("overlay_splits", _DEFAULT_OVERLAY_SPLITS))
 
@@ -181,6 +184,7 @@ def build_run_plan(cfg: dict, overrides: Optional[dict] = None) -> RunPlan:
         checkpoint_dir=str(Path(ckpt_base) / seed_leaf),
         local_results_dir=str(Path(local_base) / seed_leaf),
         drive_results_dir=str(Path(drive_base) / seed_leaf),
+        drive_checkpoint_dir=str(Path(drive_ckpt_base) / seed_leaf),
         n_overlay_samples=int(output.get("n_overlay_samples", 8)),
         overlay_splits=overlay_splits,
     )
@@ -208,6 +212,7 @@ def describe_plan(plan: RunPlan) -> str:
         f"Checkpoint      : {plan.checkpoint_path}",
         f"Local results   : {plan.local_results_dir}",
         f"Drive results   : {plan.drive_results_dir}",
+        f"Drive checkpoint: {plan.drive_checkpoint_dir}",
         f"Overlays        : {plan.n_overlay_samples} samples from {', '.join(plan.overlay_splits)}",
         "=" * 52,
     ])

@@ -45,12 +45,29 @@ def main(argv=None) -> int:
         return 0
 
     # Heavy deps imported only for a real run.
+    import time
+
     from src.training import reporting
-    from src.training.engine import default_tracker_factory, run_training
+    from src.training.engine import EngineDeps, default_tracker_factory, run_training
+
+    deps = None
+    if reporting.drive_available(plan.drive_checkpoint_dir):
+        _mirror_state = {"last": None}
+        _MIRROR_INTERVAL_SECONDS = 10 * 60
+
+        def _on_best_checkpoint(checkpoint_path: str) -> None:
+            now = time.time()
+            last = _mirror_state["last"]
+            if last is not None and (now - last) < _MIRROR_INTERVAL_SECONDS:
+                return
+            reporting.mirror_checkpoint_to_drive(checkpoint_path, plan.drive_checkpoint_dir)
+            _mirror_state["last"] = now
+
+        deps = EngineDeps(on_best_checkpoint=_on_best_checkpoint)
 
     log_path = Path(plan.local_results_dir) / "run.log"
     with reporting.Tee(log_path):
-        model, result, splits = run_training(plan, cfg)
+        model, result, splits = run_training(plan, cfg, deps)
         eval_results = reporting.evaluate_all_splits(
             model, splits, plan, result.device, default_tracker_factory
         )
@@ -62,6 +79,7 @@ def main(argv=None) -> int:
         reporting.save_mask_overlays(model, splits, plan, result.device, plan.local_results_dir)
 
     reporting.mirror_to_drive(plan.local_results_dir, plan.drive_results_dir)
+    reporting.mirror_checkpoint_to_drive(plan.checkpoint_path, plan.drive_checkpoint_dir)
     print(f"Done. Checkpoint: {plan.checkpoint_path}")
     return 0
 
