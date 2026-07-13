@@ -1,26 +1,41 @@
+---
+status: living
+last_updated: 2026-07-13
+---
+
 <!-- FILE MAP | Project plan & pick-up point: what's done, what's missing, and the exact next
      steps. Read this first when resuming work. Pairs with docs/DECISIONS.md (why choices were
-     made) and CLAUDE.md (repo map). Update the status table + checklist as items land. -->
+     made) and CLAUDE.md (repo map). Update the status table + checklist as items land.
+     Doc class: living — bump last_updated above on any substantive change (see DECISIONS.md). -->
 
 # Project Plan — Where to Pick Up
 
 **Study:** Can LoRA-adapted SAM (and MedSAM) match specialist polyp networks on the PraNet
 benchmark while degrading less on unseen datasets — and at what training / model-size / compute cost?
 
-**Last updated:** 2026-07-02
+**Last updated:** 2026-07-13
 
 ---
 
 ## TL;DR — where we are
 
-**All the code is done, including the vanilla-vs-fine-tuned comparison. The only thing left is to
-run it on a GPU.** The four-way comparison the professor asked for (vanilla SAM, vanilla MedSAM,
-fine-tuned SAM, fine-tuned MedSAM, plus U-Net as a reference) is fully wired into
-`notebooks/05_benchmark.ipynb`; the zero-shot baselines are implemented in `src/models/zeroshot.py`
-and unit-tested. Nothing else needs to be written.
+**First results are in (single seed), and the tightening work is coded.** The five-model comparison
+(U-Net, fine-tuned SAM ViT-H, fine-tuned MedSAM ViT-B, plus vanilla SAM/MedSAM zero-shot) has been run
+once at seed 42; `notebooks/06_findings.ipynb` reads out the honest result: among the *prompt-free*
+models, **SAM ViT-H + LoRA generalizes best to unseen data (0.792 mDice vs U-Net 0.752)** at 0.4% of
+the parameters, while the high vanilla scores are an oracle-prompt upper bound (negative
+generalization gap), not a win over fine-tuning.
 
-**Pick up at:** [Run & train](#run--train-the-only-remaining-work) — train the three models, then run
-the benchmark. That produces every number (accuracy, size, training time, hardware) for all five models.
+Since then, three things landed in code (see DECISIONS.md, 2026-07-13):
+- **Multi-seed** is already wired (`train_colab.ipynb` `SEEDS`, benchmark mean ± std aggregation) —
+  only the seed 43/44 GPU runs remain.
+- **`sam_b`** (SAM ViT-B + LoRA) added to isolate the MedSAM backbone confound — code done, GPU run
+  remains.
+- **Results aggregator** (`aggregate_results.py`) consolidates every run's `metrics.json` into
+  `results/summary/` without re-running notebooks.
+
+**Pick up at:** [Run & train](#run--train-the-only-remaining-work) — run seeds 43/44 and `sam_b` on
+Colab, re-run `aggregate_results.py`, then write up `docs/FINDINGS.md`.
 
 ---
 
@@ -111,13 +126,16 @@ Offline check: `python train.py --config configs/run.yaml --dry-run`.
 
 ## Task checklist
 
-- [x] Implement zero-shot vanilla SAM inference wrapper
-- [x] Implement zero-shot vanilla MedSAM inference wrapper (same protocol)
+- [x] Implement zero-shot vanilla SAM + MedSAM inference wrappers (GT-box prompted)
 - [x] GPU-free unit tests for prompt derivation
 - [x] Extend `05_benchmark.ipynb` to the four-way (2×2) comparison + U-Net
+- [x] Train U-Net, fine-tuned SAM ViT-H, fine-tuned MedSAM ViT-B at **seed 42** → metrics.json
+- [x] Run `05_benchmark.ipynb` → five-model comparison (seed 42); results read out in `06_findings.ipynb`
+- [x] Multi-seed support in trainer + benchmark aggregation (mean ± std)
+- [x] Add `sam_b` (SAM ViT-B + LoRA) to isolate the MedSAM backbone confound
+- [x] Results aggregator (`aggregate_results.py` → `results/summary/`)
 - [ ] Confirm prompting protocol with the professor (default = `box`)
-- [ ] Train U-Net baseline (T4) → checkpoint + metrics.json
-- [ ] Train fine-tuned MedSAM ViT-B (T4) → checkpoint + metrics.json
-- [ ] Train fine-tuned SAM ViT-H (L4 / A100) → checkpoint + metrics.json
-- [ ] Run `05_benchmark.ipynb` → five-model comparison
-- [ ] Write up accuracy-vs-cost findings (size, training time, hardware needed)
+- [ ] Train seeds **43 and 44** for the prompt-free models (T4/L4) → fills mean ± std
+- [ ] Train `sam_b` (SAM ViT-B + LoRA), T4 → the backbone-confound row
+- [ ] Re-run `aggregate_results.py` to absorb the new rows
+- [ ] Write up accuracy-vs-cost findings in `docs/FINDINGS.md` (mark immutable on publish)
