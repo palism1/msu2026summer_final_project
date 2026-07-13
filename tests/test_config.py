@@ -30,6 +30,7 @@ def base_cfg(tmp_path):
         training: {batch_size: 16, epochs: 100, lr: 1.0e-4, weight_decay: 1.0e-4, early_stop_patience: 10, seed: 42}
         model: {name: unet, encoder: resnet34, encoder_weights: imagenet}
         sam: {model_type: vit_h, checkpoint: sam_vit_h_4b8939.pth, lora_r: 4, lora_alpha: 8, lora_dropout: 0.1}
+        sam_b: {model_type: vit_b, checkpoint: sam_vit_b_01ec64.pth, lora_r: 4, lora_alpha: 8, lora_dropout: 0.1}
         medsam: {model_type: vit_b, checkpoint: medsam_vit_b.pth, lora_r: 4, lora_alpha: 8, lora_dropout: 0.1}
     """)
     return tmp_path
@@ -78,6 +79,16 @@ def test_sam_checkpoint_name_encodes_backbone(base_cfg):
     assert plan.checkpoint_dir == "checkpoints/sam_vit_h/seed42"
 
 
+def test_sam_b_isolates_backbone_from_medsam(base_cfg):
+    # SAM ViT-B + LoRA: same ViT-B backbone as MedSAM but generic SAM weights, so it lands
+    # at its own checkpoints/sam_vit_b path, distinct from medsam/ and sam_vit_h/.
+    _write(base_cfg, "run.yaml", "base_config: base.yaml\nrun: {model: sam_b, seed: 42}\n")
+    plan = build_run_plan(load_run_config(base_cfg / "run.yaml"))
+    assert plan.backbone == "vit_b"
+    assert plan.checkpoint_name == "sam_vit_b"
+    assert plan.checkpoint_dir == "checkpoints/sam_vit_b/seed42"
+
+
 def test_cli_overrides_win(base_cfg):
     _write(base_cfg, "run.yaml", "base_config: base.yaml\nrun: {model: medsam, seed: 1, epochs: 5}\n")
     cfg = load_run_config(base_cfg / "run.yaml")
@@ -116,4 +127,4 @@ def test_describe_plan_names_all_stages(base_cfg):
 
 
 def test_model_choices_constant():
-    assert set(MODEL_CHOICES) == {"unet", "sam_lora", "medsam"}
+    assert set(MODEL_CHOICES) == {"unet", "sam_lora", "medsam", "sam_b"}

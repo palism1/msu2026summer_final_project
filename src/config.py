@@ -17,7 +17,7 @@ import yaml
 # Pipeline stages, named once here so --dry-run and CLAUDE.md stay in sync. [DO NOT TOUCH]
 PIPELINE_STAGES = ("data pipeline", "model build", "train", "evaluate", "benchmark")
 
-MODEL_CHOICES = ("unet", "sam_lora", "medsam")
+MODEL_CHOICES = ("unet", "sam_lora", "medsam", "sam_b")
 
 _DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
 _DEFAULT_DRIVE_CHECKPOINTS = "/content/drive/MyDrive/msu2026_checkpoints"
@@ -110,6 +110,8 @@ def _resolve_backbone(model: str, cfg: dict) -> str:
         return cfg.get("model", {}).get("encoder", "resnet34")
     if model == "sam_lora":
         return cfg.get("sam", {}).get("model_type", "vit_h")
+    if model == "sam_b":
+        return cfg.get("sam_b", {}).get("model_type", "vit_b")
     if model == "medsam":
         return cfg.get("medsam", {}).get("model_type", "vit_b")
     raise ValueError(f"Unknown model '{model}'. Choices: {', '.join(MODEL_CHOICES)}")
@@ -117,8 +119,8 @@ def _resolve_backbone(model: str, cfg: dict) -> str:
 
 def _checkpoint_name(model: str, backbone: str) -> str:
     # Matches the folder scheme used by evaluate.py and notebooks 02-05:
-    #   unet -> "unet",  sam_lora -> "sam_<backbone>" (e.g. sam_vit_h),  medsam -> "medsam".
-    if model == "sam_lora":
+    #   unet -> "unet",  sam_lora/sam_b -> "sam_<backbone>" (sam_vit_h / sam_vit_b),  medsam -> "medsam".
+    if model in ("sam_lora", "sam_b"):
         return f"sam_{backbone}"
     return model
 

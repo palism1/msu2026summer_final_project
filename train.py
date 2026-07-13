@@ -24,7 +24,7 @@ def _parse_args(argv=None):
     p = argparse.ArgumentParser(description="Config-driven polyp segmentation trainer.")
     p.add_argument("--config", default="configs/run.yaml", help="run config (or legacy base config)")
     p.add_argument("--dry-run", action="store_true", help="print the resolved plan and exit 0")
-    p.add_argument("--model", default=None, choices=["unet", "sam_lora", "medsam"],
+    p.add_argument("--model", default=None, choices=["unet", "sam_lora", "medsam", "sam_b"],
                    help="override the model chosen in the config")
     p.add_argument("--seed", type=int, default=None, help="override the seed")
     p.add_argument("--epochs", type=int, default=None, help="override the epoch count")

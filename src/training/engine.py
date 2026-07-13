@@ -66,6 +66,14 @@ def default_build_model(plan: RunPlan, cfg: dict, device: str) -> nn.Module:
             lora_r=sam["lora_r"], lora_alpha=sam["lora_alpha"], lora_dropout=sam["lora_dropout"],
             img_size=plan.img_size, device=device,
         )
+    elif plan.model == "sam_b":
+        from src.models import build_sam_lora
+        sb = cfg["sam_b"]
+        model = build_sam_lora(
+            sam_checkpoint=sb["checkpoint"], model_type=sb["model_type"],
+            lora_r=sb["lora_r"], lora_alpha=sb["lora_alpha"], lora_dropout=sb["lora_dropout"],
+            img_size=plan.img_size, device=device,
+        )
     elif plan.model == "medsam":
         from src.models import build_medsam_lora
         med = cfg["medsam"]
