@@ -12,3 +12,4 @@ dist/
 *.pth
 wandb/
 HANDOFF.md
+.DS_Store

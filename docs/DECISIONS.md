@@ -1,3 +1,8 @@
+---
+status: append-only
+last_updated: 2026-07-13
+---
+
 <!-- FILE MAP | Decision log: notable choices, why they were made, and when.
      Newest last. Each entry: Decision · Why · Date (+ source commit/file where visible).
      Tags: [TWEAK] revisitable  ·  [DO NOT TOUCH] load-bearing, don't undo without reading why. -->
@@ -83,3 +88,33 @@ that asymmetry when comparing. Protocol is swappable (`ZS_PROMPT` = `box` | `poi
 the top of the model-build cell in `05_benchmark.ipynb`; the pure prompt-derivation math is GPU-free
 and unit-tested. `src/models/__init__.py` was made lazy (PEP 562) so importing `box_from_mask` for a
 torch-free test does not drag in torch. (`src/models/zeroshot.py`, `tests/test_zeroshot.py`, `notebooks/05_benchmark.ipynb`)
+
+### SAM ViT-B + LoRA variant (`sam_b`) + results aggregator — 2026-07-13
+Two additions. (1) **`sam_b`**: a new model choice — SAM ViT-B fine-tuned with LoRA. It has the
+**same ViT-B backbone as MedSAM but generic (non-medical) SAM weights**, so comparing `sam_vit_b`
+to `medsam` in the benchmark isolates *backbone capacity* from *medical pretraining* — the confound
+in the finding that MedSAM (ViT-B) trailed SAM (ViT-H). Implemented by mirroring the `medsam`
+pattern: reuses `build_sam_lora(model_type="vit_b")` (no new builder), reads a `sam_b` config block,
+lands at `checkpoints/sam_vit_b/seed<seed>` (the existing `[DO NOT TOUCH]` path scheme, only a new
+leaf added). Optional in `05_benchmark.ipynb` so an untrained `sam_b` never breaks the benchmark.
+(2) **Results aggregator**: `src/results_summary.py` (torch-free) + `aggregate_results.py` consolidate
+every per-run `metrics.json` (local or the Drive mirror) into `results/summary/` (SUMMARY.md + CSVs +
+JSON) with mean ± std across seeds — so results are viewable without re-running any notebook.
+(`src/config.py`, `src/training/engine.py`, `train.py`, `evaluate.py`, `configs/base.yaml`,
+`src/results_summary.py`, `aggregate_results.py`, `f7ab197`)
+
+### Docs classified living / immutable / append-only in frontmatter — 2026-07-13
+Every committed markdown doc declares its class in YAML frontmatter so a reader knows whether it is
+current state or a historical record (convention borrowed from the stroke-burden-index project):
+- **living** (`status: living`, `last_updated: YYYY-MM-DD`) — describes current state; edit freely and
+  bump `last_updated` on any substantive change. Applies to `docs/PROJECT_PLAN.md`,
+  `docs/DELEGATION_PLAN.md`, and (local, gitignored) `HANDOFF.md`.
+- **immutable** (`status: immutable`, `date:`, `superseded_by: null`) — a report/review frozen at a
+  point in time; substantive changes require a new superseding doc that sets the old one's
+  `superseded_by`, and only typo/link fixes happen in place. (None yet; the final write-up
+  `docs/FINDINGS.md` will be immutable once published.)
+- **append-only** (`status: append-only`) — this decisions log; entries are never rewritten, only
+  added, and reversals come as new entries referencing the old one.
+- **Exempt:** `README.md` (GitHub renders it as the repo landing page) and `CLAUDE.md` (the agent repo
+  map, consumed as tooling); their git history is the authoritative timestamp. If a `last_updated`
+  field ever drifts, `git log -1 --format=%cs -- <file>` is the source of truth.
