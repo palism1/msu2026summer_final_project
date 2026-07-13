@@ -35,7 +35,7 @@ def evaluate_split(model, loader, device) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/base.yaml")
-    parser.add_argument("--model", default="unet", choices=["unet", "sam_lora"])
+    parser.add_argument("--model", default="unet", choices=["unet", "sam_lora", "sam_b"])
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -53,9 +53,10 @@ def main():
             encoder=cfg["model"]["encoder"],
             encoder_weights=None,  # weights loaded from checkpoint
         )
-    elif args.model == "sam_lora":
+    elif args.model in ("sam_lora", "sam_b"):
+        # sam_lora -> configs' `sam` block (ViT-H); sam_b -> `sam_b` block (ViT-B ablation).
         from src.models import build_sam_lora
-        sam_cfg = cfg["sam"]
+        sam_cfg = cfg["sam" if args.model == "sam_lora" else "sam_b"]
         model = build_sam_lora(
             sam_checkpoint=sam_cfg["checkpoint"],
             model_type=sam_cfg["model_type"],

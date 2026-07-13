@@ -42,6 +42,13 @@ sam:
     - q_proj
     - v_proj
 
+sam_b:                 # SAM ViT-B + LoRA — same backbone size as MedSAM but generic SAM weights,
+  model_type: vit_b    # so it isolates "medical pretraining" from "backbone capacity" vs medsam
+  checkpoint: sam_vit_b_01ec64.pth
+  lora_r: 4
+  lora_alpha: 8
+  lora_dropout: 0.1
+
 medsam:
   model_type: vit_b
   checkpoint: medsam_vit_b.pth
