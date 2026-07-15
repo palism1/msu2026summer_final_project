@@ -1,0 +1,35 @@
+# FILE MAP
+# ~L1-15  triggers: pushes/PRs touching nba-replay (path-filtered — this repo also hosts
+#         an unrelated Python ML project on main; don't burn CI on its pushes)
+# ~L16-35 job: install -> typecheck -> Biome lint -> Vitest
+# Purpose: keeps the nba-replay two-tier standard enforced on every push.
+
+name: nba-replay CI
+
+on:
+  push:
+    paths:
+      - "nba-replay/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "nba-replay/**"
+      - ".github/workflows/ci.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nba-replay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nba-replay/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
