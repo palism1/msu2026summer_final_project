@@ -11,10 +11,40 @@ Format: **Added / Changed / Removed** bullets, each with a one-line *why*.
 - Frozen data contract in `src/engine/types.ts` (`Frame`, `Play`, `SceneState`,
   `CameraPose`, `PlaybackState`); every module imports from it, none define rivals.
 - Two-tier standard: `src/engine` + `src/cameras` + `src/data` are strict, pure, and
-  unit-tested with no Three.js (enforced by `tests/tierBoundary.test.ts`);
-  `src/render` + `src/ui` are typecheck-only glue and the only Three.js importers.
+  unit-tested with no Three.js; `src/render` + `src/ui` are typecheck-only glue and the
+  only Three.js importers.
+- Both structural rules (contract types only in `types.ts`; Three.js only in render/ui)
+  are mechanically enforced by `tests/architecture.test.ts`; the ruleset itself lives in
+  `CLAUDE.md` and is auto-loaded by Claude Code sessions working in this directory.
 - CI (GitHub Actions) runs typecheck + Biome + Vitest on every push touching this app.
 - Not yet built (deliberately): real SportVU data loader, tactical camera, timeline UI.
+
+## 2026-07-15 — Ruleset + architecture guard
+
+### Added
+
+- **`CLAUDE.md` at `nba-replay/` (not the repo root) with the project ruleset.**
+  Why: Claude Code auto-loads it for any session touching this directory, so the rules
+  are re-read before work every time; the repo root already carries the host ML
+  project's own CLAUDE.md, and nesting keeps both alive.
+- **`tests/architecture.test.ts` guarding BOTH structural rules.**
+  Why: instructions guide, CI enforces — the test fails the build if any contract type
+  (`Frame`, `SceneState`, `Play`, `PlayerSnapshot`, `CameraPose`, `PlaybackState`,
+  `Vec2`, `Vec3`) is declared outside `src/engine/types.ts`, or if Three.js is imported
+  anywhere outside `src/render`/`src/ui`. It scans ALL of `src/`, so future directories
+  are covered automatically. Guard scope widened beyond the amendment's Frame/SceneState
+  because redefining any contract type is the same leak.
+
+### Changed
+
+- **`types.ts` edits upgraded from "log it" to a formal event** (user approval + dated
+  DECISIONS entry + all consumers updated in the same commit). Why: it is the one
+  expensive edit in the codebase; friction there is intentional.
+
+### Removed
+
+- **`tests/tierBoundary.test.ts`** — superseded by `tests/architecture.test.ts`, which
+  enforces a strict superset (deny-everywhere-except vs. allow-list of three dirs).
 
 ## 2026-07-15 — Initial scaffold
 
