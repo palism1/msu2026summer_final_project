@@ -1,0 +1,28 @@
+// FILE MAP
+// ~L1-10   compilerOptions: language target + module resolution (Vite/bundler style)
+// ~L11-20  compilerOptions: strictness flags (two-tier standard: everything here is strict;
+//          the "loose" tier for render/ui means no unit-test requirement, NOT loose types)
+// ~L21-25  include: all source + tests + vite config
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "useDefineForClassFields": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    // DO NOT TOUCH: strict + noUncheckedIndexedAccess are the type-safety floor for the
+    // load-bearing tier (engine/cameras/data); weakening them silently breaks the contract.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src", "tests", "vite.config.ts"]
+}
