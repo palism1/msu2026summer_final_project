@@ -40,13 +40,14 @@ src/ui/main.ts             <- entry point: DOM + requestAnimationFrame loop
 
 | Tier | Dirs | Rules |
 | --- | --- | --- |
-| **Load-bearing** | `src/engine`, `src/cameras`, `src/data` | Strict TS, pure functions, Vitest unit tests, **no Three.js imports** (mechanically enforced by `tests/tierBoundary.test.ts`) |
+| **Load-bearing** | `src/engine`, `src/cameras`, `src/data` | Strict TS, pure functions, Vitest unit tests, **no Three.js imports** (mechanically enforced by `tests/architecture.test.ts`) |
 | **Loose** | `src/render`, `src/ui` | Typecheck-only glue; the **only** places allowed to import Three.js |
 
 `src/engine/types.ts` is the anti-backtracking anchor: `Frame`/`Play` (raw samples),
 `SceneState` (interpolated world), `CameraPose`, `PlaybackState`. Additive changes are
 fine; renames/removals require a `DECISIONS.md` entry. No module may define its own
-competing data shapes.
+competing data shapes — `tests/architecture.test.ts` fails the build if a contract type
+is declared anywhere else. Project rules live in [`CLAUDE.md`](CLAUDE.md).
 
 ## POV camera math (src/cameras/povCamera.ts)
 
