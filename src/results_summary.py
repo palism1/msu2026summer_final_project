@@ -107,6 +107,7 @@ _AGG_METRICS = (
     "mean_seen_dice",
     "mean_unseen_dice",
     "generalization_gap_dice",
+    "train_minutes",
 )
 
 
@@ -167,15 +168,16 @@ def render_markdown(rows: list[dict], agg: list[dict]) -> str:
     lines.append("## By model (mean ± std over seeds)")
     lines.append("")
     lines.append("| Model | Seeds | Mean seen mDice | Mean unseen mDice | Gap (seen−unseen) | "
-                 "Trainable params |")
-    lines.append("|---|---|---|---|---|---|")
+                 "Trainable params | Train min |")
+    lines.append("|---|---|---|---|---|---|---|")
     for e in agg:
         seen = f"{_fmt(e['mean_seen_dice_mean'])} ± {_fmt(e['mean_seen_dice_std'])}"
         unseen = f"{_fmt(e['mean_unseen_dice_mean'])} ± {_fmt(e['mean_unseen_dice_std'])}"
         gap = f"{_fmt(e['generalization_gap_dice_mean'])} ± {_fmt(e['generalization_gap_dice_std'])}"
         tp = f"{e['trainable_params']:,}" if e.get("trainable_params") is not None else "—"
+        tm = _fmt(e.get("train_minutes_mean"), 1)
         n = f"{e['n_seeds']} ({', '.join(str(s) for s in e['seeds'])})" if e["seeds"] else "0"
-        lines.append(f"| {e['model']} | {n} | {seen} | {unseen} | {gap} | {tp} |")
+        lines.append(f"| {e['model']} | {n} | {seen} | {unseen} | {gap} | {tp} | {tm} |")
     lines.append("")
 
     lines.append("## Per run (each model × seed)")

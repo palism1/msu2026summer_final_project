@@ -60,6 +60,8 @@ def test_aggregate_mean_std_over_seeds():
     assert e["n_seeds"] == 2 and e["seeds"] == [42, 43]
     assert e["mean_unseen_dice_mean"] == 0.76      # (0.75 + 0.77) / 2
     assert e["mean_unseen_dice_std"] == 0.01       # population std of {0.75, 0.77}
+    assert e["train_minutes_mean"] == 20.0         # 1200 s per run in the fixture payload
+    assert e["train_minutes_std"] == 0.0
 
 
 def test_single_seed_std_is_zero_not_nan():
