@@ -1,5 +1,6 @@
 /data/
 /checkpoints/
+/results/
 runs/
 __pycache__/
 *.pyc
