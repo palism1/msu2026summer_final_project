@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- FILE MAP
+  ~L1-15  head: title + minimal full-screen styles (no CSS framework by design)
+  ~L16-22 body: #app mount point + module entry (src/ui/main.ts)
+  Purpose: Vite entry page. All behavior lives in src/; keep this file dumb.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NBA Replay — Player POV</title>
+    <style>
+      html, body, #app { margin: 0; height: 100%; overflow: hidden; background: #10131a; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; color: #e8e8e8;
+        font: 13px/1.4 ui-monospace, monospace; background: rgba(0, 0, 0, 0.45);
+        padding: 6px 10px; border-radius: 6px; pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>
