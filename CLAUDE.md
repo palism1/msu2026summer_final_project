@@ -12,7 +12,9 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 2. **Model build** — `src/models/` — `build_unet`, `build_sam_lora` (ViT-H = `sam_lora`, ViT-B = `sam_b`), `build_medsam_lora`.
 3. **Train** — `train.py` (driven by `configs/run.yaml`) → `src/config.py` + `src/training/`.
 4. **Evaluate** — all 5 splits (`evaluate.py`; also inside `train.py` via `src/training/reporting.py`).
-5. **Benchmark** — `notebooks/05_benchmark.ipynb` — compares all trained models side by side.
+5. **Benchmark** — `notebooks/05_benchmark.ipynb` — compares all trained models side by side;
+   `notebooks/06_findings.ipynb` / `notebooks/07_report.ipynb` read out the results (see
+   `docs/FINDINGS.md`).
 
 ## Run order
 1. `notebooks/01_data_pipeline.ipynb` — download data, verify splits (run once).
@@ -20,7 +22,8 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
    selected model×seed pairs in one session, skips already-trained ones, mirrors checkpoints +
    results to Drive) or locally: `python train.py --config configs/run.yaml [--model M]`
    where `M` ∈ `unet | sam_lora | medsam | sam_b`. Offline check: `... --dry-run`.
-3. `notebooks/05_benchmark.ipynb` — compare results across models.
+3. `notebooks/05_benchmark.ipynb` — compare results across models; `notebooks/06_findings.ipynb` /
+   `notebooks/07_report.ipynb` — runnable readouts of the write-up in `docs/FINDINGS.md`.
 4. `python aggregate_results.py` — consolidate every run's `metrics.json` (local or Drive mirror)
    into `results/summary/` (SUMMARY.md + CSVs + JSON). No GPU, no notebook re-run.
 
@@ -41,4 +44,5 @@ Committed markdown declares a class in YAML frontmatter: **living** (edit freely
 ## Pointers
 - **Plan & where to pick up (start here when resuming):** `docs/PROJECT_PLAN.md`
 - **Design decisions & rationale:** `docs/DECISIONS.md`  ·  **Remaining-work delegation:** `docs/DELEGATION_PLAN.md`
+- **Results write-up (source of truth for all numbers):** `docs/FINDINGS.md`
 - **Project overview, datasets, CLI:** `README.md`

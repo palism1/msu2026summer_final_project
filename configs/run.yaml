@@ -6,7 +6,7 @@
 base_config: base.yaml   # [DO NOT TOUCH] sibling in configs/; merged first, run/output below override
 
 run:
-  model: medsam            # [TWEAK] unet | sam_lora | medsam  (medsam = ViT-B, ~375MB, T4-friendly)
+  model: medsam            # [TWEAK] unet | sam_lora | medsam | sam_b  (medsam = ViT-B, ~375MB, T4-friendly)
   seed: 42                 # [TWEAK]
   epochs: 50               # [TWEAK] caps training length
   batch_size: 4            # [TWEAK] 4 fits SAM/MedSAM on a T4; raise for U-Net

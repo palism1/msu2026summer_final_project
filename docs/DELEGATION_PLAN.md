@@ -1,6 +1,6 @@
 ---
 status: living
-last_updated: 2026-07-13
+last_updated: 2026-07-21
 ---
 
 <!-- Delegation plan for the remaining work. Each task is scoped to the owner best suited to it.
@@ -21,10 +21,10 @@ verification-before-completion (run tests + dry-run, show output) before any "do
 (designs are decided) and NOT systematic-debugging (no bug in play).
 
 Grounding facts already verified against the code (so nothing gets re-derived from the stale HANDOFF):
-- **Fix 1 is already implemented in code.** `train_colab.ipynb` cell 1 has `SEEDS = [42, 43, 44]`
-  and cells 4-6 loop `model × seed`; `05_benchmark.ipynb` cells 13-14 already aggregate per-seed
-  `metrics.json` into mean ± std for the prompt-free models, reading `m['eval'][key]['dice']` exactly
-  as `reporting.py:build_metrics_payload` writes it. Nothing to build — only the seed 43/44 GPU runs.
+- **Fix 1 is implemented and run.** `train_colab.ipynb` cell 1 has `SEEDS = [42, 43, 44]` and cells
+  4-6 loop `model × seed`; `05_benchmark.ipynb` cells 13-14 aggregate per-seed `metrics.json` into
+  mean ± std for the prompt-free models, reading `m['eval'][key]['dice']` exactly as
+  `reporting.py:build_metrics_payload` writes it. All three seeds have completed on Colab.
 - `train.py` accepts `--seed`/`--model`; per-seed outputs route to `.../seed<seed>/` (src/config.py).
 - `build_sam_lora(model_type="vit_b")` already exists; the `sam_vit_b_01ec64.pth` download URL is
   already present in `train_colab.ipynb` cell 3. The checkpoint-path scheme is `[DO NOT TOUCH]`.
@@ -74,9 +74,9 @@ fixture dir and confirm `SUMMARY.md` + CSVs render.
 
 ## Task B (was Fix 2) — SAM ViT-B + LoRA variant (isolate the MedSAM backbone confound)
 
-**Owner:** orchestrator (me), inline. **Status:** DONE (code) — source + notebooks + evaluate.py
-wired and verified (31 tests green, `sam_b` dry-run shows `sam_vit_b/seed43`, both notebooks parse).
-Only the GPU training run of `sam_b` remains, which is Mikko's on Colab.
+**Owner:** orchestrator (me), inline. **Status:** DONE — source + notebooks + evaluate.py wired and
+verified (34 tests green, `sam_b` dry-run shows `sam_vit_b/seed43`, both notebooks parse), and the
+GPU training run (3 seeds, Mikko on Colab) completed. Results in `docs/FINDINGS.md`.
 **Why:** MedSAM (ViT-B) came out weakest, but it is a smaller backbone than SAM (ViT-H). A SAM ViT-B
 + LoRA run has the *same backbone size as MedSAM* with *generic SAM weights*, so it separates "medical
 pretraining" from "backbone capacity." Implemented as a new `sam_b` model choice mirroring `medsam`.
@@ -99,20 +99,21 @@ pretraining" from "backbone capacity." Implemented as a new `sam_b` model choice
 **Guard held:** reused `build_sam_lora(model_type="vit_b")` — no new builder; only ADDED a path leaf,
 never changed the existing `[DO NOT TOUCH]` scheme.
 
-## Fix 1 — Multi-seed (2-3 seeds) — CODE COMPLETE
+## Fix 1 — Multi-seed (2-3 seeds) — DONE
 
-**Owner:** Mikko (GPU runs only). No code work: the trainer loop and the benchmark's mean ± std
-aggregation already exist and are correct (see grounding facts). Run seeds 43 and 44 on Colab; the
-skip-if-done logic means finished pairs are not retrained. Task A then surfaces the multi-seed spread
-in one place.
+**Owner:** Mikko (GPU runs). The trainer loop and the benchmark's mean ± std aggregation were already
+correct (see grounding facts); seeds 43 and 44 have now been run on Colab for all prompt-free models,
+and Task A's aggregator surfaces the multi-seed spread (mean ± std) in `results/summary/` and
+`docs/FINDINGS.md`.
 
-## Fix 3 — Accuracy-vs-cost write-up
+## Fix 3 — Accuracy-vs-cost write-up — DONE
 
-**Owner:** orchestrator (me). **Consumes Task A's `SUMMARY.md`.** Draft `docs/FINDINGS.md`: per model,
-mDice seen vs unseen, gap, trainable params, ckpt size, train time, hardware. Lead with the honest
-headline (SAM ViT-H + LoRA generalizes best among prompt-free models at 0.792) and the oracle-prompt
-caveat. State limitations: single seed until Fix 1's runs, MedSAM confound until Task B's run, oracle
-asymmetry. Draftable now on single-seed numbers; finalized once Task A reflects the new runs.
+**Owner:** orchestrator (me). **Consumed Task A's `SUMMARY.md`.** `docs/FINDINGS.md` is written: per
+model, mDice seen vs unseen, gap, trainable params, ckpt size, train time, hardware. Leads with the
+honest headline (SAM ViT-H + LoRA generalizes best among prompt-free models, 0.806 unseen mDice vs
+U-Net's 0.755, at ~3% of U-Net's trainable params) and the oracle-prompt caveat. Limitations recorded
+in FINDINGS.md: one benchmark family, three seeds (not single-seed — the std columns reflect run-to-run
+spread), and the oracle-box baselines being an upper bound rather than a peer comparison.
 
 ## Fix 4 — Professor sign-off on the oracle prompt protocol
 
@@ -123,15 +124,15 @@ asymmetry. Draftable now on single-seed numbers; finalized once Task A reflects 
 
 ## Execution order
 
-| # | Task | Owner | Depends on |
+| # | Task | Owner | Status |
 |---|---|---|---|
-| 1 | **Task A — results aggregator** | Me, inline | nothing (runs against existing results now) |
-| 2 | **Task B — `sam_b` variant** (finish notebooks + verify) | Me, inline | in progress |
-| 3 | Fix 1 seed 43/44 runs | Mikko (Colab) | — (code done) |
-| 4 | Task B `sam_b` GPU run | Mikko (Colab) | Task B code |
-| 5 | Re-run aggregator to absorb new rows | Me / Mikko | Tasks A, 3, 4 |
-| 6 | Fix 3 write-up | Me | Task A summary |
-| 7 | Fix 4 professor sign-off | Mikko | — |
+| 1 | **Task A — results aggregator** | Me, inline | DONE |
+| 2 | **Task B — `sam_b` variant** (notebooks + verify + GPU run) | Me / Mikko (Colab) | DONE |
+| 3 | Fix 1 seed 43/44 runs | Mikko (Colab) | DONE |
+| 4 | Task B `sam_b` GPU run | Mikko (Colab) | DONE |
+| 5 | Re-run aggregator to absorb new rows | Me / Mikko | DONE |
+| 6 | Fix 3 write-up | Me | DONE — `docs/FINDINGS.md` |
+| 7 | Fix 4 professor sign-off | Mikko | **Remaining — only open item** |
 
 **Final verification (orchestrator):** full `pytest` green; `sam_b` dry-run shows the new paths;
 notebooks parse; `aggregate_results.py` produces `results/summary/`; the write-up's numbers match the

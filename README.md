@@ -17,10 +17,21 @@ We compare:
 | Polyp-PVT | Transformer | Reference | Specialist SOTA |
 | SAM (zero-shot) | Foundation | No | Foundation baseline |
 | SAM-LoRA | Foundation + PEFT | Yes (adapters) | Main contribution |
+| MedSAM-ViT-B + LoRA | Foundation (medical-pretrained) + PEFT | Yes (adapters) | Backbone/pretraining confound |
 
 > **Backbone-confound ablation:** `sam_b` (SAM ViT-B + LoRA) has the same backbone size as MedSAM but
 > generic SAM weights, so comparing it to MedSAM ViT-B separates *backbone capacity* from *medical
 > pretraining*. Train it with `--model sam_b`; it appears as an optional row in the benchmark.
+
+---
+
+## Findings
+
+Results are complete across three seeds. **SAM-ViT-H + LoRA generalizes best to unseen data —
+0.806 mean unseen mDice vs U-Net's 0.755 — while training only ~3% of U-Net's parameters.**
+Full accuracy-vs-cost breakdown, per-split behavior, the backbone-vs-pretraining ablation, and the
+oracle-box baseline caveat: see **[`docs/FINDINGS.md`](docs/FINDINGS.md)** (or the runnable
+`notebooks/07_report.ipynb`).
 
 ---
 
@@ -49,7 +60,8 @@ We compare:
 │   ├── 01_data_pipeline.ipynb     # Download data, verify splits (run once)
 │   ├── train_colab.ipynb          # Colab wrapper: pick models/seeds in cell 1, runs train.py
 │   ├── 05_benchmark.ipynb         # Compare all trained models side by side
-│   └── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   ├── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   └── 07_report.ipynb            # Runnable, chart-bearing version of docs/FINDINGS.md
 ├── train.py                   # CLI training entry point
 ├── evaluate.py                # CLI evaluation (all 5 splits)
 ├── aggregate_results.py       # Consolidate results -> results/summary (no GPU, no re-run)
@@ -79,7 +91,7 @@ Training split: 900 Kvasir + 550 CVC-ClinicDB = 1,450 images
 ## Quick Start (Google Colab)
 
 1. Open `notebooks/01_data_pipeline.ipynb` in Colab. It installs deps, clones the repo, downloads the datasets, and verifies the splits end-to-end (run once).
-2. Choose what to train by editing `run.model` in `configs/run.yaml` (`unet` | `sam_lora` | `medsam`), then commit and push.
+2. Choose what to train by editing `run.model` in `configs/run.yaml` (`unet` | `sam_lora` | `medsam` | `sam_b`), then commit and push.
 3. Open `notebooks/train_colab.ipynb` and run its three cells: it fetches the data plus the one checkpoint your config needs and runs `train.py` under a single shared protocol. Results land in `results/<model>/seed<seed>/` and mirror to Drive.
 4. Open `notebooks/05_benchmark.ipynb` to compare all trained models side by side.
 5. Run `python aggregate_results.py` to collect every run's metrics into `results/summary/SUMMARY.md` — no GPU, and no re-running notebooks.
@@ -118,10 +130,12 @@ python aggregate_results.py
 
 ## Work Plan
 
-| Phase | Weeks | Deliverable |
-|---|---|---|
-| 1 | 1-2 | Data pipeline, splits, metrics (done) |
-| 2 | 3-5 | U-Net baseline + evaluation harness |
-| 3 | 6-8 | SAM-LoRA adaptation |
-| 4 | 9-10 | Full benchmark, ablations, efficiency |
-| 5 | 11-12 | Web demo, final report |
+Original proposal timeline; all phases through 4 are complete (see `docs/FINDINGS.md` for results).
+
+| Phase | Weeks | Deliverable | Status |
+|---|---|---|---|
+| 1 | 1-2 | Data pipeline, splits, metrics | Done |
+| 2 | 3-5 | U-Net baseline + evaluation harness | Done |
+| 3 | 6-8 | SAM-LoRA adaptation | Done |
+| 4 | 9-10 | Full benchmark, ablations, efficiency | Done — `docs/FINDINGS.md` |
+| 5 | 11-12 | Web demo, final report | Pending professor sign-off |

@@ -57,6 +57,7 @@ medsam:
   lora_dropout: 0.1
 
 sam2:
+  # unused: not wired into MODEL_CHOICES; placeholder for a future SAM2 ablation
   model_cfg: sam2_hiera_large.yaml
   checkpoint: sam2_hiera_large.pt
   lora_r: 4
