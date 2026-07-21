@@ -9,8 +9,13 @@ from pathlib import Path
 from src.results_summary import (
     aggregate_by_model,
     build_summary,
+    build_zeroshot_payload,
     discover_metrics,
     flatten,
+    render_markdown,
+    split_by_tier,
+    tier_of,
+    write_zeroshot_metrics,
 )
 
 
@@ -98,3 +103,88 @@ def test_build_summary_writes_all_files(tmp_path):
     assert "SAM-ViT-H + LoRA" in md and "SAM-ViT-B + LoRA" in md
     payload = json.loads((out / "summary.json").read_text())
     assert len(payload["runs"]) == 2 and len(payload["by_model"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Oracle tier: build_zeroshot_payload, the write->discover->flatten round-trip, and the
+# honesty assertion that the two tiers never end up in the same table.
+# ---------------------------------------------------------------------------
+
+def _zeroshot_eval(seen, unseen):
+    return {
+        "seen_kvasir": {"dice": seen}, "seen_clinicdb": {"dice": seen},
+        "cvc_colondb": {"dice": unseen}, "etis_larib": {"dice": unseen},
+        "cvc_300": {"dice": unseen},
+    }
+
+
+def test_build_zeroshot_payload_is_untrained_oracle_tier():
+    payload = build_zeroshot_payload(
+        "vanilla_sam", "vit_h", _zeroshot_eval(seen=0.86, unseen=0.90),
+        total_params=641_000_000, device_name="Tesla T4", prompt_protocol="box",
+    )
+    assert payload["params"]["trainable"] == 0
+    assert payload["params"]["total"] == 641_000_000
+    assert payload["seed"] == 0
+    assert payload["vanilla"] is True
+    assert payload["prompt_protocol"] == "box"
+    assert payload["generalization_gap_dice"] == round(0.86 - 0.90, 6)
+
+    row = flatten("vanilla_sam", payload)
+    assert row["tier"] == "oracle"
+    assert "(vanilla, oracle-box)" in row["model"]
+    assert row["trainable_params"] == 0
+
+
+def test_write_zeroshot_metrics_round_trips_through_discover_and_flatten(tmp_path):
+    results_root = tmp_path / "results"
+    payload = build_zeroshot_payload(
+        "vanilla_medsam", "vit_b", _zeroshot_eval(seen=0.80, unseen=0.84),
+        total_params=93_000_000, device_name="Tesla T4", prompt_protocol="box",
+    )
+    written = write_zeroshot_metrics(results_root, "vanilla_medsam", payload)
+    assert written == results_root / "vanilla_medsam" / "seed0" / "metrics.json"
+
+    found = discover_metrics([results_root])
+    assert ("vanilla_medsam", 0) in found
+    loaded_payload, _src = found[("vanilla_medsam", 0)]
+    row = flatten("vanilla_medsam", loaded_payload)
+    assert row["tier"] == "oracle"
+    assert row["trainable_params"] == 0
+    assert "(vanilla, oracle-box)" in row["model"]
+
+
+def test_oracle_tier_never_merges_into_the_prompt_free_table(tmp_path):
+    """HONESTY: an oracle row that outscores every trained model must still land in its own
+    table, never ranked into the prompt-free comparison."""
+    local = tmp_path / "results"
+    _write_metrics(local, "sam_vit_h", 42, _payload("sam_lora", "vit_h", 42, seen=0.90, unseen=0.79))
+    oracle_payload = build_zeroshot_payload(
+        "vanilla_sam", "vit_h", _zeroshot_eval(seen=0.86, unseen=0.95),  # beats every trained row
+        total_params=641_000_000, device_name="Tesla T4", prompt_protocol="box",
+    )
+    write_zeroshot_metrics(local, "vanilla_sam", oracle_payload)
+
+    found = discover_metrics([local])
+    rows = [flatten(m, payload) for (m, _s), (payload, _src) in sorted(found.items())]
+    agg = aggregate_by_model(rows)
+
+    assert tier_of("vanilla_sam") == "oracle"
+    assert tier_of("sam_vit_h") == "prompt-free"
+
+    tiers = split_by_tier(agg)
+    pf_dirs = {e["model_dir"] for e in tiers["prompt-free"]}
+    oracle_dirs = {e["model_dir"] for e in tiers["oracle"]}
+    assert pf_dirs == {"sam_vit_h"}
+    assert oracle_dirs == {"vanilla_sam"}
+
+    md = render_markdown(rows, agg)
+    pf_header = "## Prompt-free (trained, mean ± std over seeds)"
+    oracle_header = "## Oracle-box baselines"
+    assert pf_header in md and oracle_header in md
+
+    pf_section = md.split(pf_header, 1)[1].split(oracle_header, 1)[0]
+    oracle_section = md.split(oracle_header, 1)[1]
+    assert "SAM ViT-H (vanilla, oracle-box)" not in pf_section
+    assert "SAM ViT-H (vanilla, oracle-box)" in oracle_section
+    assert "SAM-ViT-H + LoRA" in pf_section

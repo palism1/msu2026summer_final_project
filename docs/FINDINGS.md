@@ -53,6 +53,20 @@ best unseen accuracy and the smallest gap. The accuracy-per-trainable-parameter 
 the LoRA adapter; the accuracy-per-minute comparison favors U-Net. Which one matters depends on
 whether the target is the benchmark or the unseen clinic.
 
+## Without fine-tuning (oracle-box baselines)
+
+Vanilla SAM-ViT-H and vanilla MedSAM-ViT-B, run with no LoRA and no training at all, prompted
+with a box derived from the ground-truth mask. This isolates fine-tuning itself: same backbones
+as the rows above, zero trainable parameters, a prompt the trained models never get. Numbers are
+pending the Colab run of `05_benchmark.ipynb`'s zero-shot cell, which writes
+`results/vanilla_sam/seed0/metrics.json` and `results/vanilla_medsam/seed0/metrics.json`; once
+those files exist, `aggregate_results.py` and `notebooks/07_report.ipynb`'s oracle-box section
+render them automatically. These baselines are kept in a separate tier throughout — never
+ranked into the table above. A GT-derived box hands the model the polyp's location, so a high
+score here is an upper bound on the task's difficulty, not evidence a zero-shot model
+generalizes better than a trained one; the tell is a negative seen-to-unseen gap, expected for
+prompts that are equally informative on every split regardless of what the model was trained on.
+
 ## Limitations
 
 - **One benchmark family.** Every split comes from PraNet's own five datasets. These numbers do
@@ -63,9 +77,9 @@ whether the target is the benchmark or the unseen clinic.
   pretraining, and cannot be attributed to one. Separating them
   needs SAM-ViT-B + LoRA (`sam_b`): same backbone size and LoRA recipe as MedSAM, generic SAM
   weights. That run is designed but not yet executed.
-- **No without-fine-tuning numbers here.** The vanilla zero-shot SAM/MedSAM baselines (the
-  with-vs-without-fine-tuning comparison) run in `06_findings.ipynb` under an oracle box prompt
-  and are pending; this document covers the trained prompt-free models only.
+- **The oracle-box baselines are an upper bound, not a peer.** They see the ground-truth box at
+  eval time; the trained models above see nothing. Treat the "Without fine-tuning" section as a
+  ceiling check, not a fourth entry in the accuracy-and-cost table.
 
 ## Status
 

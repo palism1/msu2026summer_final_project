@@ -4,6 +4,10 @@
 #   runs into mean +/- std per model, and renders SUMMARY.md / CSVs / JSON.
 #   PURE by design: stdlib only (no torch/numpy/pandas), so aggregate_results.py runs on any machine
 #   without a GPU. [DO NOT TOUCH] the split groupings — they must match reporting.generalization_gap.
+#   Two tiers, never merged: "prompt-free" (trained models) and "oracle" (untrained, GT-box-
+#   prompted vanilla SAM/MedSAM baselines — see TIER/tier_of/split_by_tier). The oracle tier is
+#   also written here, not just read: build_zeroshot_payload + write_zeroshot_metrics let
+#   05_benchmark.ipynb persist its zero-shot rows as metrics.json for this same module to pick up.
 """Consolidate per-run metrics.json files into one human- and machine-readable summary."""
 
 from __future__ import annotations
@@ -25,10 +29,24 @@ MODEL_DISPLAY = {
     "sam_vit_h": "SAM-ViT-H + LoRA",
     "sam_vit_b": "SAM-ViT-B + LoRA",
     "medsam": "MedSAM-ViT-B + LoRA",
+    "vanilla_sam": "SAM ViT-H (vanilla, oracle-box)",
+    "vanilla_medsam": "MedSAM ViT-B (vanilla, oracle-box)",
 }
 
 # Default Drive mirror layout written by train.py (src/config.py _DEFAULT_DRIVE_RESULTS).
 DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
+
+# Tier split: "oracle" = untrained, GT-box-prompted zero-shot baselines (upper bound, not a fair
+# peer); everything else defaults to "prompt-free" (trained, no prompt hint at eval time). Never
+# merge these into one ranked table — see render_markdown / split_by_tier.
+TIER = {
+    "vanilla_sam": "oracle",
+    "vanilla_medsam": "oracle",
+}
+
+
+def tier_of(model_dir: str) -> str:
+    return TIER.get(model_dir, "prompt-free")
 
 
 def _display_name(model_dir: str) -> str:
@@ -80,6 +98,7 @@ def flatten(model_dir: str, payload: dict) -> dict:
     row = {
         "model_dir": model_dir,
         "model": _display_name(model_dir),
+        "tier": tier_of(model_dir),
         "backbone": payload.get("backbone"),
         "seed": payload.get("seed"),
     }
@@ -149,6 +168,60 @@ def aggregate_by_model(rows: list[dict]) -> list[dict]:
     return agg
 
 
+def split_by_tier(agg: list[dict]) -> dict[str, list[dict]]:
+    """Split aggregated rows into {"prompt-free": [...], "oracle": [...]}, order preserved.
+
+    ``aggregate_by_model`` already sorts by mean unseen Dice descending, so each tier's slice
+    comes out sorted too — no re-sort needed. Never combine these two lists into one table:
+    that's the whole point of the tier split (see module docstring / TIER)."""
+    out: dict[str, list[dict]] = {"prompt-free": [], "oracle": []}
+    for e in agg:
+        out.setdefault(tier_of(e["model_dir"]), []).append(e)
+    return out
+
+
+def build_zeroshot_payload(model_key: str, backbone: str, eval_results: dict,
+                           total_params: int, device_name: str | None,
+                           prompt_protocol: str) -> dict:
+    """
+    Build a metrics.json-shaped payload for an untrained (zero-shot) vanilla SAM/MedSAM oracle
+    baseline, so it round-trips through discover_metrics/flatten exactly like a trained run's
+    payload: 0 trainable params, no training time, and the oracle-box prompt protocol recorded
+    for provenance. ``eval_results`` is ``{split_key: {"dice": ..., ...}}``, same shape
+    MetricTracker.compute() returns and src/training/reporting.build_metrics_payload uses.
+    """
+    mean_seen = _mean_over(eval_results, SEEN_SPLITS)
+    mean_unseen = _mean_over(eval_results, UNSEEN_SPLITS)
+    gap = (mean_seen - mean_unseen) if (mean_seen is not None and mean_unseen is not None) else None
+    return {
+        "model": model_key,
+        "backbone": backbone,
+        "seed": 0,
+        "device_name": device_name,
+        "params": {
+            "total": total_params,
+            "trainable": 0,
+            "trainable_pct": 0.0 if total_params else None,
+        },
+        "checkpoint_size_mb": None,
+        "timing": {"epochs_run": 0, "total_seconds": 0},
+        "best_val_dice": None,
+        "eval": {k: {m: round(v, 6) for m, v in sc.items()} for k, sc in eval_results.items()},
+        "generalization_gap_dice": round(gap, 6) if gap is not None else None,
+        "prompt_protocol": prompt_protocol,
+        "vanilla": True,
+    }
+
+
+def write_zeroshot_metrics(results_root: str | Path, model_key: str, payload: dict) -> Path:
+    """Write a zero-shot baseline payload to ``<results_root>/<model_key>/seed0/metrics.json``."""
+    out_dir = Path(results_root) / model_key / "seed0"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "metrics.json"
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
 def _fmt(v, nd: int = 4) -> str:
     if v is None:
         return "—"
@@ -157,38 +230,65 @@ def _fmt(v, nd: int = 4) -> str:
     return str(v)
 
 
-def render_markdown(rows: list[dict], agg: list[dict]) -> str:
-    """Human-readable SUMMARY.md: a per-model mean +/- std table and a per-run detail table."""
-    lines: list[str] = ["# Results Summary", ""]
-    lines.append("_Consolidated from per-run `metrics.json` by `aggregate_results.py`. "
-                 "No notebooks were re-run; oracle-prompted zero-shot baselines are not trained "
-                 "and so are not listed here._")
-    lines.append("")
-
-    lines.append("## By model (mean ± std over seeds)")
-    lines.append("")
-    lines.append("| Model | Seeds | Mean seen mDice | Mean unseen mDice | Gap (seen−unseen) | "
-                 "Trainable params | Train min |")
-    lines.append("|---|---|---|---|---|---|---|")
-    for e in agg:
+def _agg_table_rows(entries: list[dict]) -> list[str]:
+    """Header + body lines for one tier's "mean ± std over seeds" table."""
+    out = ["| Model | Seeds | Mean seen mDice | Mean unseen mDice | Gap (seen−unseen) | "
+           "Trainable params | Train min |",
+           "|---|---|---|---|---|---|---|"]
+    for e in entries:
         seen = f"{_fmt(e['mean_seen_dice_mean'])} ± {_fmt(e['mean_seen_dice_std'])}"
         unseen = f"{_fmt(e['mean_unseen_dice_mean'])} ± {_fmt(e['mean_unseen_dice_std'])}"
         gap = f"{_fmt(e['generalization_gap_dice_mean'])} ± {_fmt(e['generalization_gap_dice_std'])}"
         tp = f"{e['trainable_params']:,}" if e.get("trainable_params") is not None else "—"
         tm = _fmt(e.get("train_minutes_mean"), 1)
         n = f"{e['n_seeds']} ({', '.join(str(s) for s in e['seeds'])})" if e["seeds"] else "0"
-        lines.append(f"| {e['model']} | {n} | {seen} | {unseen} | {gap} | {tp} | {tm} |")
+        out.append(f"| {e['model']} | {n} | {seen} | {unseen} | {gap} | {tp} | {tm} |")
+    return out
+
+
+def render_markdown(rows: list[dict], agg: list[dict]) -> str:
+    """Human-readable SUMMARY.md: two tier-separated per-model tables, plus a per-run detail
+    table. The two tiers are never merged into one ranked table — an untrained oracle-box
+    baseline outscoring a trained model on unseen data is an artifact of the prompt it was
+    given, not evidence it generalizes better; keeping it in its own table (with its own
+    caption) is the whole point of the tier split."""
+    lines: list[str] = ["# Results Summary", ""]
+    lines.append(
+        "_Consolidated from per-run `metrics.json` by `aggregate_results.py`. No notebooks "
+        "were re-run. Two tables follow: models trained and evaluated with no prompt at all "
+        "(the fair comparison), and untrained oracle-box baselines evaluated with a "
+        "ground-truth-derived box prompt the trained models never see (an upper bound, not a "
+        "fair peer)._"
+    )
+    lines.append("")
+
+    tiers = split_by_tier(agg)
+
+    lines.append("## Prompt-free (trained, mean ± std over seeds)")
+    lines.append("")
+    lines += _agg_table_rows(tiers.get("prompt-free", []))
+    lines.append("")
+
+    lines.append("## Oracle-box baselines (not trained — GT-derived box prompt; "
+                 "upper bound, not a fair peer)")
+    lines.append("")
+    oracle_entries = tiers.get("oracle", [])
+    if oracle_entries:
+        lines += _agg_table_rows(oracle_entries)
+    else:
+        lines.append("_None recorded yet. Run `05_benchmark.ipynb`'s zero-shot cell to "
+                     "populate `results/vanilla_sam` / `results/vanilla_medsam`._")
     lines.append("")
 
     lines.append("## Per run (each model × seed)")
     lines.append("")
-    header = (["Model", "Seed"] + [s for s in ALL_SPLITS]
+    header = (["Model", "Seed", "Tier"] + [s for s in ALL_SPLITS]
               + ["Mean seen", "Mean unseen", "Gap", "Params", "Ckpt MB", "Epochs", "Train min",
                  "Device"])
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join(["---"] * len(header)) + "|")
     for r in sorted(rows, key=lambda x: (x["model"], x["seed"] if x["seed"] is not None else -1)):
-        cells = [r["model"], _fmt(r["seed"])]
+        cells = [r["model"], _fmt(r["seed"]), r.get("tier", "—")]
         cells += [_fmt(r[s]) for s in ALL_SPLITS]
         cells += [
             _fmt(r["mean_seen_dice"]), _fmt(r["mean_unseen_dice"]),
