@@ -1,6 +1,6 @@
 ---
 status: living
-last_updated: 2026-07-13
+last_updated: 2026-07-28
 ---
 
 <!-- FILE MAP | Project plan & pick-up point: what's done, what's missing, and the exact next
@@ -13,29 +13,39 @@ last_updated: 2026-07-13
 **Study:** Can LoRA-adapted SAM (and MedSAM) match specialist polyp networks on the PraNet
 benchmark while degrading less on unseen datasets — and at what training / model-size / compute cost?
 
-**Last updated:** 2026-07-13
+**Last updated:** 2026-07-28
 
 ---
 
 ## TL;DR — where we are
 
-**First results are in (single seed), and the tightening work is coded.** The five-model comparison
-(U-Net, fine-tuned SAM ViT-H, fine-tuned MedSAM ViT-B, plus vanilla SAM/MedSAM zero-shot) has been run
-once at seed 42; `notebooks/06_findings.ipynb` reads out the honest result: among the *prompt-free*
-models, **SAM ViT-H + LoRA generalizes best to unseen data (0.792 mDice vs U-Net 0.752)** at 0.4% of
-the parameters, while the high vanilla scores are an oracle-prompt upper bound (negative
-generalization gap), not a win over fine-tuning.
+**Full results are in** (U-Net, SAM ViT-H + LoRA, SAM ViT-B + LoRA, MedSAM ViT-B + LoRA, three seeds
+each, plus the two published oracle-box baselines) — see `docs/FINDINGS.md`. Among the *prompt-free*
+models, SAM-ViT-H + LoRA generalizes best (0.806 unseen mDice vs U-Net 0.755) at 0.4% of the
+parameters; MedSAM-ViT-B + LoRA trails every model, including the smaller-backbone SAM-ViT-B + LoRA.
 
-Since then, three things landed in code (see DECISIONS.md, 2026-07-13):
-- **Multi-seed** is already wired (`train_colab.ipynb` `SEEDS`, benchmark mean ± std aggregation) —
-  only the seed 43/44 GPU runs remain.
-- **`sam_b`** (SAM ViT-B + LoRA) added to isolate the MedSAM backbone confound — code done, GPU run
-  remains.
-- **Results aggregator** (`aggregate_results.py`) consolidates every run's `metrics.json` into
-  `results/summary/` without re-running notebooks.
+**Open question raised in review (2026-07-28, `docs/MEDSAM_INVESTIGATION.md`):** MedSAM's deficit was
+partly attributed to "medical pretraining is a net drag," but the training pipeline fed MedSAM's
+frozen encoder ImageNet-standardized inputs when MedSAM was fit on per-image `[0,1]` min-max inputs —
+a normalization bug (H1) that could account for some or all of the gap. Fixed in code: normalization
+and augmentation policy are now bound to the model key (`src/config.MODEL_SPECS`), and three new
+experiments isolate the confound:
 
-**Pick up at:** [Run & train](#run--train-the-only-remaining-work) — run seeds 43/44 and `sam_b` on
-Colab, re-run `aggregate_results.py`, then write up `docs/FINDINGS.md`.
+- **A — vanilla MedSAM under its own preprocessing** (`vanilla_medsam_minmax`, no training, ~2 min).
+- **B — vanilla SAM-ViT-B oracle-box baseline** (`vanilla_sam_b`, no training, ~2 min) — fills the
+  missing cell of the 2x2.
+- **C — MedSAM + LoRA retrained under a three-arm design** (`medsam_minmax` + `medsam_ctrl`, 3 seeds
+  each, ~95 min A100 total) — `medsam_ctrl` is an augmentation-matched control, needed because
+  min-max normalization is exactly invariant to ColorJitter's brightness/contrast (see
+  `docs/MEDSAM_INVESTIGATION.md`, H1 addendum).
+
+None of A/B/C have GPU numbers yet. Published paths (`checkpoints/medsam/`, `results/medsam/`,
+`results/vanilla_sam/`, `results/vanilla_medsam/`) are untouched — the new experiments write to new
+model keys / baseline names only.
+
+**Pick up at:** [Run & train](#run--train-the-only-remaining-work) — run experiments A, B, then C on
+Colab (see `docs/MEDSAM_INVESTIGATION.md` "How to run these" for exact commands), re-run
+`aggregate_results.py`, then update the caveat in `docs/FINDINGS.md`.
 
 ---
 
@@ -85,17 +95,24 @@ Every requirement is implemented. The last two now just need a GPU run to produc
 
 Everything below needs a GPU; no more code changes are required.
 
-1. **Train all three models in one Colab session** — open `notebooks/train_colab.ipynb`, set
-   `MODELS`/`SEED`/`EPOCHS` in **cell 1** (no `run.yaml` edits, no commit/push), Run all.
-   U-Net + MedSAM fit a T4; SAM ViT-H wants an L4/A100 — either run everything on an L4, or run
-   `['unet', 'medsam']` on a T4 first and `['sam_lora']` on an L4 later (the notebook skips
-   models that already finished; checkpoints + results are auto-mirrored to Drive during training,
-   so a disconnect never loses a completed run).
-2. **Run the benchmark** — `notebooks/05_benchmark.ipynb` on an L4/A100 (it loads a second ViT-H for
-   zero-shot, ~2.5 GB extra VRAM). Out comes the full five-model comparison and the accuracy-vs-cost story.
+The original five-model comparison (U-Net, SAM-ViT-H + LoRA, SAM-ViT-B + LoRA, MedSAM-ViT-B + LoRA,
+three seeds each, plus the two published oracle-box baselines) is **done** — see `docs/FINDINGS.md`.
+What's left is experiments A, B, C from `docs/MEDSAM_INVESTIGATION.md` (~190 min A100 total,
+~2.1 GB Drive), run in that order since A determines whether C is a correction or an ablation:
 
-The vanilla SAM/MedSAM baselines need **no training** — the benchmark downloads the base weights and
-runs them zero-shot. Their "cost" is 0 training time, which is the point of the comparison.
+1. **A — vanilla MedSAM under its own preprocessing** (no training, ~2 min):
+   `python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_medsam_minmax`.
+2. **B — vanilla SAM-ViT-B oracle-box baseline** (no training, ~2 min):
+   `python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b`.
+3. **C — MedSAM + LoRA retrained under the three-arm design** (3 seeds x 2 arms, ~95 min A100):
+   train `medsam_minmax` and `medsam_ctrl` together at seeds 42/43/44, via
+   `notebooks/train_colab.ipynb` (`MODELS = ['medsam_minmax', 'medsam_ctrl']`) or
+   `python train.py --config configs/run.yaml --model <medsam_minmax|medsam_ctrl> --seed <N>`.
+4. **Consolidate** — `python aggregate_results.py` (no GPU, no notebook re-run).
+
+Exact commands and what each comparison answers: `docs/MEDSAM_INVESTIGATION.md` → "How to run
+these". All three write to new model keys / baseline names — `checkpoints/medsam/`,
+`results/medsam/`, `results/vanilla_sam/`, `results/vanilla_medsam/` are untouched by design.
 
 ---
 
@@ -134,8 +151,17 @@ Offline check: `python train.py --config configs/run.yaml --dry-run`.
 - [x] Multi-seed support in trainer + benchmark aggregation (mean ± std)
 - [x] Add `sam_b` (SAM ViT-B + LoRA) to isolate the MedSAM backbone confound
 - [x] Results aggregator (`aggregate_results.py` → `results/summary/`)
-- [ ] Confirm prompting protocol with the professor (default = `box`)
-- [ ] Train seeds **43 and 44** for the prompt-free models (T4/L4) → fills mean ± std
-- [ ] Train `sam_b` (SAM ViT-B + LoRA), T4 → the backbone-confound row
+- [x] Confirm prompting protocol with the professor (default = `box`)
+- [x] Train seeds **43 and 44** for the prompt-free models → fills mean ± std
+- [x] Train `sam_b` (SAM ViT-B + LoRA) → the backbone-confound row
+- [x] Write up accuracy-vs-cost findings in `docs/FINDINGS.md`
+- [x] Diagnose the MedSAM normalization bug (H1) and land the fix in code
+  (`src/normalization.py`, `src/config.MODEL_SPECS`, `zeroshot_eval.py`) — `docs/DECISIONS.md`,
+  `docs/MEDSAM_INVESTIGATION.md`
+- [ ] Run experiment A — `vanilla_medsam_minmax` (no training, ~2 min)
+- [ ] Run experiment B — `vanilla_sam_b` (no training, ~2 min)
+- [ ] Run experiment C — `medsam_minmax` + `medsam_ctrl`, 3 seeds each (~95 min A100)
 - [ ] Re-run `aggregate_results.py` to absorb the new rows
-- [ ] Write up accuracy-vs-cost findings in `docs/FINDINGS.md` (mark immutable on publish)
+- [ ] Update the `docs/FINDINGS.md` normalization caveat with the A/B/C results; retract or confirm
+  the "medical pretraining is a net drag" line depending on what `medsam_ctrl` -> `medsam_minmax`
+  shows

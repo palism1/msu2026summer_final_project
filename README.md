@@ -33,6 +33,7 @@ We compare:
 │   └── run.yaml               # Per-run overrides: selects model / seed / outputs
 ├── src/
 │   ├── config.py             # Config load/merge + run-plan resolution (torch-free)
+│   ├── normalization.py      # Input-normalization math: ImageNet stats + MedSAM's min-max (torch-free)
 │   ├── results_summary.py    # Consolidate per-run metrics.json -> results/summary (torch-free)
 │   ├── data/
 │   │   ├── dataset.py         # PolypDataset + PraNet split builder
@@ -41,7 +42,8 @@ We compare:
 │   │   └── segmentation.py    # mDice, mIoU, MAE, wFm, Sm, Em
 │   ├── models/
 │   │   ├── unet.py            # U-Net via segmentation-models-pytorch
-│   │   └── sam_adapter.py     # SAM + LoRA + lightweight decoder
+│   │   ├── sam_adapter.py     # SAM + LoRA + lightweight decoder
+│   │   └── zeroshot.py        # Untrained oracle-box SAM/MedSAM baselines
 │   └── training/
 │       ├── engine.py          # Config-driven training loop (all models)
 │       └── reporting.py       # Writes metrics.json, mask overlays, run.log
@@ -52,6 +54,7 @@ We compare:
 │   └── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
 ├── train.py                   # CLI training entry point
 ├── evaluate.py                # CLI evaluation (all 5 splits)
+├── zeroshot_eval.py           # CLI untrained oracle-box baseline evaluator
 ├── aggregate_results.py       # Consolidate results -> results/summary (no GPU, no re-run)
 └── requirements.txt
 ```
@@ -79,10 +82,11 @@ Training split: 900 Kvasir + 550 CVC-ClinicDB = 1,450 images
 ## Quick Start (Google Colab)
 
 1. Open `notebooks/01_data_pipeline.ipynb` in Colab. It installs deps, clones the repo, downloads the datasets, and verifies the splits end-to-end (run once).
-2. Choose what to train by editing `run.model` in `configs/run.yaml` (`unet` | `sam_lora` | `medsam`), then commit and push.
+2. Choose what to train by editing `run.model` in `configs/run.yaml` (`unet` | `sam_lora` | `medsam` | `sam_b` | `medsam_minmax` | `medsam_ctrl`), then commit and push.
 3. Open `notebooks/train_colab.ipynb` and run its three cells: it fetches the data plus the one checkpoint your config needs and runs `train.py` under a single shared protocol. Results land in `results/<model>/seed<seed>/` and mirror to Drive.
 4. Open `notebooks/05_benchmark.ipynb` to compare all trained models side by side.
-5. Run `python aggregate_results.py` to collect every run's metrics into `results/summary/SUMMARY.md` — no GPU, and no re-running notebooks.
+5. Run `python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b` (or `vanilla_medsam_minmax`) for the untrained oracle-box baselines — no training. The published `vanilla_sam`/`vanilla_medsam` rows come from `05_benchmark.ipynb` and are rejected here by default.
+6. Run `python aggregate_results.py` to collect every run's metrics into `results/summary/SUMMARY.md` — no GPU, and no re-running notebooks.
 
 ---
 
@@ -100,7 +104,7 @@ All metrics match the PraNet evaluation protocol:
 ## CLI Usage
 
 ```bash
-# Train the model selected in configs/run.yaml (unet | sam_lora | medsam | sam_b)
+# Train the model selected in configs/run.yaml (unet | sam_lora | medsam | sam_b | medsam_minmax | medsam_ctrl)
 python train.py --config configs/run.yaml
 
 # Offline sanity check — no GPU or torch required
@@ -109,6 +113,11 @@ python train.py --config configs/run.yaml --dry-run
 # Evaluate all 5 splits
 python evaluate.py --config configs/base.yaml --model unet \
                    --checkpoint checkpoints/unet/seed42/best.pt
+
+# Untrained oracle-box baseline (no training); vanilla_sam / vanilla_medsam are published
+# by 05_benchmark.ipynb and rejected here without --allow-published
+python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b
+python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b --dry-run
 
 # Consolidate every run's metrics.json into results/summary/ (no GPU, no notebook re-run)
 python aggregate_results.py

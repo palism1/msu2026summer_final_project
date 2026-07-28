@@ -1,6 +1,6 @@
 ---
 status: living
-last_updated: 2026-07-21
+last_updated: 2026-07-28
 ---
 
 <!-- Accuracy-vs-cost findings for the cross-dataset polyp-segmentation study. Doc class: living.
@@ -65,6 +65,19 @@ weights for MedSAM's medical weights at the same backbone size costs 0.100 — m
 much. On this polyp benchmark under LoRA, MedSAM's medical pretraining is a net drag relative to
 generic SAM weights, and it accounts for most of MedSAM's deficit. Backbone capacity matters, but
 the pretraining source matters more.
+
+**Caveat (raised in review, 2026-07-28 — see `docs/MEDSAM_INVESTIGATION.md`):** the −0.100 above is
+confounded. The training pipeline standardized every model's input with ImageNet statistics, which
+is correct for SAM by construction (`Sam.preprocess` uses the same constants) but wrong for MedSAM,
+whose frozen encoder was fine-tuned on per-image `[0,1]` min-max inputs and never saw ImageNet
+statistics — a mismatch that handicaps only the MedSAM arm. `medsam_minmax` (MedSAM retrained under
+its own preprocessing) measures how much of the −0.100 that normalization bug accounts for;
+`medsam_ctrl` controls for a second-order confound the fix itself introduces (min-max normalization
+is exactly invariant to brightness/contrast jitter, so naively comparing `medsam` to `medsam_minmax`
+would also change effective augmentation strength). The "net drag" reading above stands only if the
+`medsam_ctrl` -> `medsam_minmax` gap reproduces most of the original deficit; if it closes most of
+the gap instead, this line needs retracting. Neither run has GPU numbers yet — see
+`docs/PROJECT_PLAN.md`.
 
 ## What the cost buys
 

@@ -13,15 +13,20 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 3. **Train** — `train.py` (driven by `configs/run.yaml`) → `src/config.py` + `src/training/`.
 4. **Evaluate** — all 5 splits (`evaluate.py`; also inside `train.py` via `src/training/reporting.py`).
 5. **Benchmark** — `notebooks/05_benchmark.ipynb` — compares all trained models side by side.
+   Untrained oracle-box baselines run separately via `zeroshot_eval.py`.
 
 ## Run order
 1. `notebooks/01_data_pipeline.ipynb` — download data, verify splits (run once).
 2. Train: `notebooks/train_colab.ipynb` (Colab; pick models/seeds/epochs in **cell 1** — trains all
    selected model×seed pairs in one session, skips already-trained ones, mirrors checkpoints +
    results to Drive) or locally: `python train.py --config configs/run.yaml [--model M]`
-   where `M` ∈ `unet | sam_lora | medsam | sam_b`. Offline check: `... --dry-run`.
+   where `M` ∈ `unet | sam_lora | medsam | sam_b | medsam_minmax | medsam_ctrl`. Offline check:
+   `... --dry-run`.
 3. `notebooks/05_benchmark.ipynb` — compare results across models.
-4. `python aggregate_results.py` — consolidate every run's `metrics.json` (local or Drive mirror)
+4. `python zeroshot_eval.py --config configs/run.yaml --baseline B` — untrained oracle-box
+   baselines (`vanilla_sam_b`, `vanilla_medsam_minmax`; `vanilla_sam`/`vanilla_medsam` are
+   published by `05_benchmark.ipynb` and rejected here). Offline check: `... --dry-run`.
+5. `python aggregate_results.py` — consolidate every run's `metrics.json` (local or Drive mirror)
    into `results/summary/` (SUMMARY.md + CSVs + JSON). No GPU, no notebook re-run.
 
 ## Where things live
@@ -31,6 +36,10 @@ match specialist U-Net on the PraNet benchmark while generalizing better to unse
 - Results: `results/<model>/seed<seed>/` (metrics.json, mask overlays, run.log); mirrored to Drive.
 - Consolidated summary: `results/summary/` (SUMMARY.md + CSVs + JSON), produced by
   `aggregate_results.py` + `src/results_summary.py` (both torch-free).
+- Training protocol (input normalization, photometric augmentation) is bound to the model key in
+  `src/config.MODEL_SPECS`, not configurable in YAML. `medsam` / `medsam_minmax` / `medsam_ctrl`
+  share one `configs/base.yaml` block (identical weights/LoRA) but are separate model keys with
+  separate `checkpoints/`/`results/` paths on purpose — see `docs/MEDSAM_INVESTIGATION.md`.
 - `notebooks/02–04` — per-model exploration; superseded by `train.py` and preserved on the `backup/per-model-notebooks` branch (not on `main`).
 
 ## Doc status (see docs/DECISIONS.md, 2026-07-13)

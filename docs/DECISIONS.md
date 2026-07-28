@@ -1,6 +1,6 @@
 ---
 status: append-only
-last_updated: 2026-07-13
+last_updated: 2026-07-28
 ---
 
 <!-- FILE MAP | Decision log: notable choices, why they were made, and when.
@@ -118,3 +118,52 @@ current state or a historical record (convention borrowed from the stroke-burden
 - **Exempt:** `README.md` (GitHub renders it as the repo landing page) and `CLAUDE.md` (the agent repo
   map, consumed as tooling); their git history is the authoritative timestamp. If a `last_updated`
   field ever drifts, `git log -1 --format=%cs -- <file>` is the source of truth.
+
+### Model-dependent input normalization + augmentation-matched control arm — 2026-07-28 [DO NOT TOUCH the legacy keys]
+Fixes H1 from `docs/MEDSAM_INVESTIGATION.md`: `src/data/transforms.py` applied ImageNet
+standardization to every model. That is correct for SAM and U-Net by construction — SAM's own
+`Sam.preprocess` computes the same `(x - mean)/std` with the same constants x255 — but wrong for
+MedSAM, whose frozen encoder (per `bowang-lab/MedSAM`'s `train_one_gpu.py` / `MedSAM_Inference.py`)
+was fit on per-image `[0,1]` min-max inputs and never saw ImageNet statistics. ImageNet stays the
+default for `unet`/`sam_lora`/`sam_b`/`medsam` — no published number moves; a corrected MedSAM run
+is a *new* model key (`medsam_minmax`), not an edit to `medsam`, so `checkpoints/medsam/...` and
+`results/medsam/...` are untouched.
+
+**Why `medsam_ctrl` exists.** `min_max_normalize` is exactly invariant to any affine map
+`y = a*x + b` with `a > 0` — precisely what `A.ColorJitter`'s brightness (`multiply(img, a)`) and
+contrast (`multiply_add(img, f, mean*(1-f))`, where the offset is itself a scalar mean) compute.
+Verified against `albumentations/augmentations/pixel/functional.py`. So a straight `medsam` ->
+`medsam_minmax` comparison would confound normalization with augmentation strength: the minmax arm
+silently gets weaker effective photometric jitter, biased toward *worse* unseen generalization —
+dangerous in the direction of the headline claim. `medsam_ctrl` is the augmentation control:
+ImageNet-normalized, brightness/contrast forced to 0 (saturation/hue untouched — those survive
+min-max and are not part of the confound). Primary comparison is `medsam_ctrl` -> `medsam_minmax`
+(matched except normalization); `medsam` -> `medsam_ctrl` sizes the confound itself.
+
+**Protocol is code, not config.** `src/config.MODEL_SPECS` binds `(normalization, color_jitter)` to
+each model key; `reject_protocol_overrides` raises if a YAML block tries to set either under
+`medsam:`/`sam:`/`sam_b:`/`model:`. Reason: checkpoint and results paths derive from the model key
+alone (`checkpoints/<model>/seed<seed>/best.pt`), so a config-settable protocol would let two
+different input pipelines silently write into and overwrite the same published path. All three
+MedSAM arms (`medsam`, `medsam_minmax`, `medsam_ctrl`) share one `configs/base.yaml` block —
+weights and LoRA settings cannot drift apart between them; only the protocol columns differ.
+
+**`A.Lambda` over `A.Normalize(normalization="min_max")`.** The latter postdates the pinned
+`albumentations>=1.3.0` and albucore's implementation is `(max-min+1e-4)`, not MedSAM's
+`clip(max-min, 1e-8)`. `src/normalization.min_max_normalize` reproduces MedSAM's formula exactly and
+is wrapped in `A.Lambda` so both training and zero-shot inference share one tested implementation.
+
+**Zero-shot fix.** `ZeroShotSAM._set_image` normalizes with the same numpy helper when
+`normalization="minmax"`, then feeds SAM's encoder through a `pixel_mean=0/pixel_std=1` context
+manager (`_identity_preprocess`) so `Sam.preprocess`'s resize-and-pad still runs but its ImageNet
+standardization is skipped — the caller already normalized. This also fixes the oracle-tier
+`vanilla_medsam` contamination H1 identified; the corrected oracle row is the new
+`vanilla_medsam_minmax` baseline (experiment A), not an edit to the published `vanilla_medsam`.
+`vanilla_sam_b` (experiment B) fills the missing cell of the 2x2 (same-backbone oracle comparison).
+Both published oracle rows (`vanilla_sam`, `vanilla_medsam`) are blocked in the new
+`zeroshot_eval.py` unless `--allow-published` is passed, and even then only if a prior copy of the
+row is recoverable from `results/` or the Drive mirror — re-running them from a different code path
+must never silently clobber the published numbers.
+(`src/normalization.py`, `src/data/transforms.py`, `src/config.py`, `src/models/zeroshot.py`,
+`zeroshot_eval.py`, `src/training/engine.py`, `src/training/reporting.py`, `train.py`,
+`evaluate.py`, `src/results_summary.py`, `docs/MEDSAM_INVESTIGATION.md`)
