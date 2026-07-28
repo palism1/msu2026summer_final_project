@@ -91,7 +91,7 @@ def evaluate_all_splits(model, splits, plan, device, tracker_factory, batch_size
     from src.data import PolypDataset, get_val_transform
 
     model.eval()
-    transform = get_val_transform(plan.img_size)
+    transform = get_val_transform(plan.img_size, plan.normalization)
     results: dict[str, dict] = {}
     print(f"\n{'Split':<26} {'mDice':>7} {'mIoU':>7} {'MAE':>7} {'wFm':>7} {'Sm':>7} {'Em':>7}")
     print("-" * 75)
@@ -138,6 +138,8 @@ def build_metrics_payload(plan, result, eval_results: dict, model) -> dict:
         "model": plan.model,
         "backbone": plan.backbone,
         "seed": plan.seed,
+        "normalization": plan.normalization,
+        "color_jitter": plan.color_jitter,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "device": result.device,
         "device_name": result.device_name,
@@ -191,7 +193,7 @@ def save_mask_overlays(model, splits, plan, device, out_dir: str | Path) -> list
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    transform = get_val_transform(plan.img_size)
+    transform = get_val_transform(plan.img_size, plan.normalization)
     model.eval()
     saved: list[Path] = []
 

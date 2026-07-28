@@ -10,10 +10,10 @@ import argparse
 from pathlib import Path
 
 import torch
-import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.config import MODEL_SPECS, load_run_config, resolve_normalization
 from src.data import PolypDataset, build_splits, get_val_transform
 from src.metrics import MetricTracker
 
@@ -35,13 +35,13 @@ def evaluate_split(model, loader, device) -> dict:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/base.yaml")
-    parser.add_argument("--model", default="unet", choices=["unet", "sam_lora", "sam_b"])
+    parser.add_argument("--model", default="unet",
+                        choices=["unet", "sam_lora", "sam_b", "medsam", "medsam_minmax", "medsam_ctrl"])
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    with open(args.config) as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_run_config(args.config)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     img_size = cfg["data"]["img_size"]
@@ -66,13 +66,27 @@ def main():
             img_size=img_size,
             device=device,
         )
+    elif args.model in ("medsam", "medsam_minmax", "medsam_ctrl"):
+        # All three MedSAM arms share the `medsam` config block; they differ only in the
+        # protocol (normalization / color_jitter), which affects eval via resolve_normalization
+        # below, not model construction.
+        from src.models import build_medsam_lora
+        med_cfg = cfg[MODEL_SPECS[args.model].cfg_block]
+        model = build_medsam_lora(
+            medsam_checkpoint=med_cfg["checkpoint"],
+            lora_r=med_cfg["lora_r"],
+            lora_alpha=med_cfg["lora_alpha"],
+            lora_dropout=med_cfg["lora_dropout"],
+            img_size=img_size,
+            device=device,
+        )
     state = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(state)
     model = model.to(device)
 
     # --- splits ---
     splits = build_splits(cfg["data"]["root"], seed=args.seed)
-    val_transform = get_val_transform(img_size)
+    val_transform = get_val_transform(img_size, resolve_normalization(args.model))
 
     split_names = {
         "Seen — Kvasir": "seen_kvasir",

@@ -22,7 +22,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-from src.config import RunPlan
+from src.config import MODEL_SPECS, RunPlan
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +74,11 @@ def default_build_model(plan: RunPlan, cfg: dict, device: str) -> nn.Module:
             lora_r=sb["lora_r"], lora_alpha=sb["lora_alpha"], lora_dropout=sb["lora_dropout"],
             img_size=plan.img_size, device=device,
         )
-    elif plan.model == "medsam":
+    elif plan.model in ("medsam", "medsam_minmax", "medsam_ctrl"):
         from src.models import build_medsam_lora
-        med = cfg["medsam"]
+        # All three arms share the `medsam` config block: identical weights, identical LoRA.
+        # They differ only in plan.normalization / plan.color_jitter (src/config.MODEL_SPECS).
+        med = cfg[MODEL_SPECS[plan.model].cfg_block]
         model = build_medsam_lora(
             medsam_checkpoint=med["checkpoint"],
             lora_r=med["lora_r"], lora_alpha=med["lora_alpha"], lora_dropout=med["lora_dropout"],
@@ -94,12 +96,12 @@ def default_build_dataloaders(plan: RunPlan, cfg: dict):
     splits = build_splits(plan.data_root, seed=plan.seed)
     train_ds = PolypDataset(
         splits["train"]["image_paths"], splits["train"]["mask_paths"],
-        transform=get_train_transform(plan.img_size),
+        transform=get_train_transform(plan.img_size, plan.normalization, plan.color_jitter),
     )
     val_ds = PolypDataset(
         splits["seen_kvasir"]["image_paths"] + splits["seen_clinicdb"]["image_paths"],
         splits["seen_kvasir"]["mask_paths"] + splits["seen_clinicdb"]["mask_paths"],
-        transform=get_val_transform(plan.img_size),
+        transform=get_val_transform(plan.img_size, plan.normalization),
     )
     train_loader = DataLoader(
         train_ds, batch_size=plan.batch_size, shuffle=True,
@@ -188,7 +190,11 @@ def run_training(plan: RunPlan, cfg: dict, deps: Optional[EngineDeps] = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device_name = torch.cuda.get_device_name(0) if device == "cuda" else "cpu"
     set_seed(plan.seed)
-    print(f"Device: {device} ({device_name})  |  Seed: {plan.seed}  |  Model: {plan.model}")
+    cj = plan.color_jitter
+    print(
+        f"Device: {device} ({device_name})  |  Seed: {plan.seed}  |  Model: {plan.model}  |  "
+        f"Norm: {plan.normalization}  |  Jitter: b{cj['brightness']} c{cj['contrast']}"
+    )
 
     train_loader, val_loader, splits = deps.build_dataloaders(plan, cfg)
     model = deps.build_model(plan, cfg, device)

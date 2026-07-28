@@ -17,7 +17,46 @@ import yaml
 # Pipeline stages, named once here so --dry-run and CLAUDE.md stay in sync. [DO NOT TOUCH]
 PIPELINE_STAGES = ("data pipeline", "model build", "train", "evaluate", "benchmark")
 
-MODEL_CHOICES = ("unet", "sam_lora", "medsam", "sam_b")
+NORMALIZATION_CHOICES = ("imagenet", "minmax")   # kept in sync with src/normalization.py
+
+# Photometric augmentation policies. STANDARD is what every published run used. [DO NOT TOUCH]
+STANDARD_COLOR_JITTER = {"brightness": 0.2, "contrast": 0.2, "saturation": 0.2,
+                         "hue": 0.1, "p": 0.5}
+# Brightness/contrast disabled. Exists ONLY for medsam_ctrl: min_max_normalize is exactly
+# invariant to A.ColorJitter's brightness (a*x) and contrast (f*x + mean*(1-f)), so a min-max
+# model never sees those two augmentations. medsam_ctrl is the ImageNet-normalized arm with
+# them removed, making the medsam_ctrl -> medsam_minmax comparison a normalization ablation
+# rather than a normalization+augmentation one. See docs/MEDSAM_INVESTIGATION.md.
+NO_BC_COLOR_JITTER = {**STANDARD_COLOR_JITTER, "brightness": 0.0, "contrast": 0.0}
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    cfg_block: str          # configs/base.yaml block holding DEPLOYMENT settings (weights, LoRA)
+    normalization: str      # PROTOCOL — bound to the model key here, never read from YAML
+    color_jitter: dict      # PROTOCOL — ditto
+    default_backbone: str
+
+
+# [DO NOT TOUCH] The single source of model-keyed dispatch. Adding a model = adding one row.
+# Protocol (normalization, color_jitter) lives here and NOT in YAML on purpose: checkpoint and
+# results paths derive from the model key alone (checkpoints/<name>/seed<N>/best.pt), so a
+# config-settable protocol would let two different input pipelines write to one results path
+# and silently invalidate published numbers.
+# The three MedSAM arms deliberately share ONE cfg_block, so their weights/LoRA settings
+# cannot drift apart — they differ only in the protocol columns.
+MODEL_SPECS: dict[str, ModelSpec] = {
+    "unet":          ModelSpec("model",  "imagenet", STANDARD_COLOR_JITTER, "resnet34"),
+    "sam_lora":      ModelSpec("sam",    "imagenet", STANDARD_COLOR_JITTER, "vit_h"),
+    "medsam":        ModelSpec("medsam", "imagenet", STANDARD_COLOR_JITTER, "vit_b"),
+    "sam_b":         ModelSpec("sam_b",  "imagenet", STANDARD_COLOR_JITTER, "vit_b"),
+    # --- corrected / control MedSAM arms (docs/MEDSAM_INVESTIGATION.md, experiment C) ---
+    "medsam_minmax": ModelSpec("medsam", "minmax",   STANDARD_COLOR_JITTER, "vit_b"),
+    "medsam_ctrl":   ModelSpec("medsam", "imagenet", NO_BC_COLOR_JITTER,    "vit_b"),
+}
+MODEL_CHOICES = tuple(MODEL_SPECS)
+
+_PROTOCOL_KEYS = ("normalization", "color_jitter")
 
 _DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
 _DEFAULT_DRIVE_CHECKPOINTS = "/content/drive/MyDrive/msu2026_checkpoints"
@@ -99,22 +138,57 @@ class RunPlan:
     drive_checkpoint_dir: str
     n_overlay_samples: int
     overlay_splits: list[str] = field(default_factory=list)
+    normalization: str = "imagenet"
+    color_jitter: dict = field(default_factory=lambda: dict(STANDARD_COLOR_JITTER))
 
     @property
     def checkpoint_path(self) -> str:
         return str(Path(self.checkpoint_dir) / "best.pt")
 
 
+def _spec(model: str) -> ModelSpec:
+    if model not in MODEL_SPECS:
+        raise ValueError(f"Unknown model '{model}'. Choices: {', '.join(MODEL_CHOICES)}")
+    return MODEL_SPECS[model]
+
+
+def resolve_normalization(model: str) -> str:
+    """Input normalization for `model`. A pure function of the model key by design."""
+    return _spec(model).normalization
+
+
+def resolve_color_jitter(model: str) -> dict:
+    return dict(_spec(model).color_jitter)   # copy: callers must not mutate the registry
+
+
+def reject_protocol_overrides(cfg: dict) -> None:
+    """Raise if any model config block tries to set the training protocol.
+
+    Protocol is bound to the model key (MODEL_SPECS). Honouring a YAML override would let
+    `normalization: minmax` under `medsam:` retrain into checkpoints/medsam/seed42/best.pt and
+    results/medsam/seed42/ under different preprocessing, overwriting published numbers with
+    silently incomparable ones. Rejecting is the runtime invariant that a unit test on the
+    current YAML cannot provide.
+    """
+    for block_name in sorted({s.cfg_block for s in MODEL_SPECS.values()}):
+        block = cfg.get(block_name, {}) or {}
+        found = [k for k in _PROTOCOL_KEYS if k in block]
+        if found:
+            raise ValueError(
+                f"configs set {found} under the '{block_name}:' block, but training protocol "
+                f"(input normalization, photometric augmentation) is bound to the model key in "
+                f"src/config.MODEL_SPECS and is deliberately not configurable — results and "
+                f"checkpoint paths derive from the model key alone. Remove those keys. To train "
+                f"MedSAM under [0,1] min-max use --model medsam_minmax; for the augmentation "
+                f"control use --model medsam_ctrl."
+            )
+
+
 def _resolve_backbone(model: str, cfg: dict) -> str:
-    if model == "unet":
-        return cfg.get("model", {}).get("encoder", "resnet34")
-    if model == "sam_lora":
-        return cfg.get("sam", {}).get("model_type", "vit_h")
-    if model == "sam_b":
-        return cfg.get("sam_b", {}).get("model_type", "vit_b")
-    if model == "medsam":
-        return cfg.get("medsam", {}).get("model_type", "vit_b")
-    raise ValueError(f"Unknown model '{model}'. Choices: {', '.join(MODEL_CHOICES)}")
+    spec = _spec(model)
+    if model == "unet":                        # U-Net names its backbone `encoder`, not `model_type`
+        return cfg.get("model", {}).get("encoder", spec.default_backbone)
+    return cfg.get(spec.cfg_block, {}).get("model_type", spec.default_backbone)
 
 
 def _checkpoint_name(model: str, backbone: str) -> str:
@@ -141,6 +215,7 @@ def build_run_plan(cfg: dict, overrides: Optional[dict] = None) -> RunPlan:
     model = overrides.get("model") or run.get("model") or cfg.get("model", {}).get("name") or "unet"
     if model not in MODEL_CHOICES:
         raise ValueError(f"Unknown model '{model}'. Choices: {', '.join(MODEL_CHOICES)}")
+    reject_protocol_overrides(cfg)
 
     backbone = _resolve_backbone(model, cfg)
     ckpt_name = _checkpoint_name(model, backbone)
@@ -189,6 +264,8 @@ def build_run_plan(cfg: dict, overrides: Optional[dict] = None) -> RunPlan:
         drive_checkpoint_dir=str(Path(drive_ckpt_base) / seed_leaf),
         n_overlay_samples=int(output.get("n_overlay_samples", 8)),
         overlay_splits=overlay_splits,
+        normalization=resolve_normalization(model),
+        color_jitter=resolve_color_jitter(model),
     )
 
 
@@ -200,6 +277,7 @@ def describe_plan(plan: RunPlan) -> str:
         else "none (epoch/patience only)"
     )
     stages = " -> ".join(PIPELINE_STAGES)
+    cj = plan.color_jitter
     return "\n".join([
         "Run plan (dry run — nothing executed)",
         "=" * 52,
@@ -209,6 +287,9 @@ def describe_plan(plan: RunPlan) -> str:
         f"Epochs          : {plan.epochs}   batch: {plan.batch_size}   patience: {plan.patience}",
         f"LR / wd         : {plan.lr:g} / {plan.weight_decay:g}",
         f"Image size      : {plan.img_size}",
+        f"Normalization   : {plan.normalization}",
+        f"Color jitter    : brightness={cj['brightness']} contrast={cj['contrast']} "
+        f"saturation={cj['saturation']} hue={cj['hue']} p={cj['p']}",
         f"Time budget     : {budget}",
         f"Data root       : {plan.data_root}",
         f"Checkpoint      : {plan.checkpoint_path}",
@@ -218,3 +299,120 @@ def describe_plan(plan: RunPlan) -> str:
         f"Overlays        : {plan.n_overlay_samples} samples from {', '.join(plan.overlay_splits)}",
         "=" * 52,
     ])
+
+
+# ---------------------------------------------------------------------------
+# Zero-shot (oracle-box) baseline registry — zeroshot_eval.py
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ZeroShotSpec:
+    model_type: str
+    normalization: str
+    published: bool = False   # produced by 05_benchmark.ipynb; guarded in zeroshot_eval.py
+
+
+# [DO NOT TOUCH] Oracle-tier protocol, in code for the same reason as MODEL_SPECS.
+# YAML supplies only the checkpoint filename (deployment) under zeroshot.checkpoints.
+ZEROSHOT_SPECS: dict[str, ZeroShotSpec] = {
+    "vanilla_sam":           ZeroShotSpec("vit_h", "imagenet", published=True),
+    "vanilla_medsam":        ZeroShotSpec("vit_b", "imagenet", published=True),
+    "vanilla_sam_b":         ZeroShotSpec("vit_b", "imagenet"),   # experiment B
+    "vanilla_medsam_minmax": ZeroShotSpec("vit_b", "minmax"),     # experiment A
+}
+ZEROSHOT_CHOICES = tuple(ZEROSHOT_SPECS)
+
+
+@dataclass
+class ZeroShotPlan:
+    """Fully resolved, ready-to-execute description of one zero-shot oracle-box baseline run."""
+
+    key: str
+    model_type: str
+    checkpoint: str
+    normalization: str
+    prompt: str
+    box_padding: int
+    img_size: int
+    data_root: str
+    local_results_root: str
+    drive_results_root: str
+    seed: int = 0
+    # build_splits' seed only shuffles the train list, which zero-shot never touches — hence
+    # the fixed seed0 results folder regardless of splits_seed.
+    splits_seed: int = 42
+    published: bool = False
+
+    @property
+    def local_results_dir(self) -> str:
+        return str(Path(self.local_results_root) / self.key / f"seed{self.seed}")
+
+    @property
+    def drive_results_dir(self) -> str:
+        return str(Path(self.drive_results_root) / self.key / f"seed{self.seed}")
+
+
+def build_zeroshot_plan(cfg: dict, baseline: str, overrides: Optional[dict] = None) -> ZeroShotPlan:
+    """Resolve a merged config dict + baseline name into a concrete ZeroShotPlan."""
+    if baseline not in ZEROSHOT_SPECS:
+        raise ValueError(f"Unknown baseline '{baseline}'. Choices: {', '.join(ZEROSHOT_CHOICES)}")
+    spec = ZEROSHOT_SPECS[baseline]
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
+
+    zs_cfg = cfg.get("zeroshot", {}) or {}
+    checkpoints = zs_cfg.get("checkpoints", {}) or {}
+    try:
+        checkpoint = checkpoints[baseline]
+    except KeyError:
+        raise ValueError(
+            f"No checkpoint filename for baseline '{baseline}' under configs/base.yaml -> "
+            f"zeroshot.checkpoints. Add one there."
+        )
+
+    prompt = zs_cfg.get("prompt", "box")
+    if prompt not in ("box", "point"):
+        raise ValueError(f"zeroshot.prompt must be 'box' or 'point', got {prompt!r}")
+    box_padding = int(zs_cfg.get("box_padding", 5))
+
+    data = cfg.get("data", {}) or {}
+    img_size = int(data.get("img_size", 352))
+    data_root = str(data.get("root", "data/polyp"))
+
+    output = cfg.get("output", {}) or {}
+    local_results_root = overrides.get("results_dir") or output.get("local_results_dir", "results")
+    drive_results_root = output.get("drive_results_dir", _DEFAULT_DRIVE_RESULTS)
+
+    return ZeroShotPlan(
+        key=baseline,
+        model_type=spec.model_type,
+        checkpoint=checkpoint,
+        normalization=spec.normalization,
+        prompt=prompt,
+        box_padding=box_padding,
+        img_size=img_size,
+        data_root=data_root,
+        local_results_root=str(local_results_root),
+        drive_results_root=str(drive_results_root),
+        published=spec.published,
+    )
+
+
+def describe_zeroshot_plan(plan: ZeroShotPlan) -> str:
+    """Render a ZeroShotPlan as a human-readable dry-run summary."""
+    lines = [
+        "Zero-shot plan (dry run — nothing executed)",
+        "=" * 52,
+        f"Baseline        : {plan.key}  (tier: oracle)",
+        f"Backbone        : {plan.model_type}",
+        f"Checkpoint      : {plan.checkpoint}",
+        f"Normalization   : {plan.normalization}",
+        f"Prompt          : {plan.prompt}  (padding: {plan.box_padding})",
+        f"Image size      : {plan.img_size}",
+        f"Data root       : {plan.data_root}",
+        f"Local results   : {plan.local_results_dir}",
+        f"Drive results   : {plan.drive_results_dir}",
+    ]
+    if plan.published:
+        lines.append("PUBLISHED — re-running requires --allow-published")
+    lines.append("=" * 52)
+    return "\n".join(lines)

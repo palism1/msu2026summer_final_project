@@ -27,11 +27,13 @@ training:
   n_runs: 3            # report mean ± std over 3 seeds
   val_freq: 1
 
+# normalization / color_jitter are NOT set here — protocol is bound to the model key in src/config.MODEL_SPECS.
 model:
   name: unet
   encoder: resnet34
   encoder_weights: imagenet
 
+# normalization / color_jitter are NOT set here — protocol is bound to the model key in src/config.MODEL_SPECS.
 sam:
   model_type: vit_h    # primary; swap to vit_l or vit_b for ablations
   checkpoint: sam_vit_h_4b8939.pth
@@ -42,6 +44,7 @@ sam:
     - q_proj
     - v_proj
 
+# normalization / color_jitter are NOT set here — protocol is bound to the model key in src/config.MODEL_SPECS.
 sam_b:                 # SAM ViT-B + LoRA — same backbone size as MedSAM but generic SAM weights,
   model_type: vit_b    # so it isolates "medical pretraining" from "backbone capacity" vs medsam
   checkpoint: sam_vit_b_01ec64.pth
@@ -49,6 +52,7 @@ sam_b:                 # SAM ViT-B + LoRA — same backbone size as MedSAM but g
   lora_alpha: 8
   lora_dropout: 0.1
 
+# Shared by models medsam | medsam_minmax | medsam_ctrl — they differ only in training protocol (src/config.MODEL_SPECS), never in weights or LoRA settings. [DO NOT TOUCH]
 medsam:
   model_type: vit_b
   checkpoint: medsam_vit_b.pth
@@ -66,3 +70,12 @@ sam2:
 inference:
   threshold: 0.5
   tta: false           # test-time augmentation (horizontal flip ensemble)
+
+zeroshot:              # untrained oracle-box baselines, run by zeroshot_eval.py (no training).
+  prompt: box          # [TWEAK] box | point — applied identically to every baseline
+  box_padding: 5
+  checkpoints:         # deployment only; each baseline's backbone + normalization is fixed in
+    vanilla_sam: sam_vit_h_4b8939.pth          # src/config.ZEROSHOT_SPECS
+    vanilla_sam_b: sam_vit_b_01ec64.pth        # experiment B
+    vanilla_medsam: medsam_vit_b.pth
+    vanilla_medsam_minmax: medsam_vit_b.pth    # experiment A — same file, MedSAM's own [0,1] norm

@@ -17,14 +17,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from src.config import build_run_plan, describe_plan, load_run_config
+from src.config import MODEL_CHOICES, build_run_plan, describe_plan, load_run_config
 
 
 def _parse_args(argv=None):
     p = argparse.ArgumentParser(description="Config-driven polyp segmentation trainer.")
     p.add_argument("--config", default="configs/run.yaml", help="run config (or legacy base config)")
     p.add_argument("--dry-run", action="store_true", help="print the resolved plan and exit 0")
-    p.add_argument("--model", default=None, choices=["unet", "sam_lora", "medsam", "sam_b"],
+    p.add_argument("--model", default=None, choices=list(MODEL_CHOICES),
                    help="override the model chosen in the config")
     p.add_argument("--seed", type=int, default=None, help="override the seed")
     p.add_argument("--epochs", type=int, default=None, help="override the epoch count")
