@@ -66,3 +66,30 @@ def test_point_empty_mask_returns_none():
 def test_is_zeroshot_false_for_plain_objects():
     assert is_zeroshot(object()) is False
     assert is_zeroshot(None) is False
+
+
+# ---------------------------------------------------------------------------
+# Normalization plumbing on ZeroShotSAM — no torch touched by __init__, so a dummy
+# predictor is enough (docs/MEDSAM_INVESTIGATION.md experiment A).
+# ---------------------------------------------------------------------------
+
+from src.models.zeroshot import ZeroShotSAM
+
+
+class _DummyPredictor:
+    pass
+
+
+def test_zeroshot_normalization_defaults_to_imagenet():
+    zs = ZeroShotSAM(_DummyPredictor(), model_type="vit_b")
+    assert zs.normalization == "imagenet"
+
+
+def test_zeroshot_accepts_minmax():
+    zs = ZeroShotSAM(_DummyPredictor(), model_type="vit_b", normalization="minmax")
+    assert zs.normalization == "minmax"
+
+
+def test_zeroshot_rejects_unknown_normalization():
+    with pytest.raises(ValueError):
+        ZeroShotSAM(_DummyPredictor(), model_type="vit_b", normalization="zscore")

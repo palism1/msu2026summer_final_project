@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from src.results_summary import (
+    MODEL_DISPLAY,
     aggregate_by_model,
     build_summary,
     build_zeroshot_payload,
@@ -188,3 +189,43 @@ def test_oracle_tier_never_merges_into_the_prompt_free_table(tmp_path):
     assert "SAM ViT-H (vanilla, oracle-box)" not in pf_section
     assert "SAM ViT-H (vanilla, oracle-box)" in oracle_section
     assert "SAM-ViT-H + LoRA" in pf_section
+
+
+# ---------------------------------------------------------------------------
+# New model keys / normalization column (experiment A/B/C plumbing)
+# ---------------------------------------------------------------------------
+
+def test_new_result_dirs_have_display_names():
+    for key in ("medsam_minmax", "medsam_ctrl", "vanilla_sam_b", "vanilla_medsam_minmax"):
+        assert key in MODEL_DISPLAY
+
+
+def test_unknown_vanilla_dir_defaults_to_oracle_tier():
+    assert tier_of("vanilla_some_future_baseline") == "oracle"
+
+
+def test_trained_medsam_variants_stay_prompt_free():
+    assert tier_of("medsam_minmax") == "prompt-free"
+    assert tier_of("medsam_ctrl") == "prompt-free"
+
+
+def test_zeroshot_payload_records_normalization():
+    payload = build_zeroshot_payload(
+        "vanilla_medsam_minmax", "vit_b", _zeroshot_eval(seen=0.80, unseen=0.84),
+        total_params=93_000_000, device_name="Tesla T4", prompt_protocol="box",
+        normalization="minmax",
+    )
+    assert payload["normalization"] == "minmax"
+
+    legacy = build_zeroshot_payload(
+        "vanilla_sam", "vit_h", _zeroshot_eval(seen=0.86, unseen=0.90),
+        total_params=641_000_000, device_name="Tesla T4", prompt_protocol="box",
+    )
+    assert "normalization" not in legacy
+
+
+def test_flatten_tolerates_legacy_payloads_without_normalization():
+    payload = _payload("medsam", "vit_b", 42, seen=0.82, unseen=0.66)
+    assert "normalization" not in payload
+    row = flatten("medsam", payload)
+    assert row["normalization"] is None

@@ -16,10 +16,13 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
+
+from src.normalization import check_normalization, min_max_normalize
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,23 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 # Zero-shot SAM/MedSAM wrapper (holds a SamPredictor)
 # ---------------------------------------------------------------------------
 
+@contextmanager
+def _identity_preprocess(sam):
+    """Temporarily set pixel_mean=0 / pixel_std=1 so Sam.preprocess() degenerates to
+    'identity + pad to img_size'. The ResizeLongestSide resize and the zero padding stay exactly
+    as SAM does them; only the ImageNet standardization is skipped, because the caller already
+    normalized the tensor. Buffers are restored in `finally`, so an exception cannot leave the
+    model mis-scaled."""
+    import torch
+    mean, std = sam.pixel_mean, sam.pixel_std
+    sam.pixel_mean = torch.zeros_like(mean)
+    sam.pixel_std = torch.ones_like(std)
+    try:
+        yield
+    finally:
+        sam.pixel_mean, sam.pixel_std = mean, std
+
+
 class ZeroShotSAM:
     """
     Raw SAM (or MedSAM) run in inference-only mode, prompted from the GT mask.
@@ -75,7 +95,8 @@ class ZeroShotSAM:
     """
 
     def __init__(self, predictor, model_type: str, prompt: str = "box",
-                 box_padding: int = 5, checkpoint: Optional[str] = None):
+                 box_padding: int = 5, checkpoint: Optional[str] = None,
+                 normalization: str = "imagenet"):
         if prompt not in ("box", "point"):
             raise ValueError(f"prompt must be 'box' or 'point', got {prompt!r}")
         self.predictor = predictor
@@ -83,6 +104,7 @@ class ZeroShotSAM:
         self.prompt = prompt
         self.box_padding = box_padding
         self.checkpoint = checkpoint
+        self.normalization = check_normalization(normalization)
 
     # --- size accounting (for the benchmark param table / metrics.json) ---
     def total_parameters(self) -> int:
@@ -96,6 +118,26 @@ class ZeroShotSAM:
         if self.checkpoint and Path(self.checkpoint).exists():
             return round(Path(self.checkpoint).stat().st_size / 1e6, 2)
         return None
+
+    def _set_image(self, image_uint8: np.ndarray) -> None:
+        """Encode one image under this baseline's normalization.
+
+        "imagenet": SamPredictor.set_image -> Sam.preprocess -> (x - pixel_mean)/pixel_std,
+                    which IS SAM's native preprocessing — correct for SAM, wrong for MedSAM.
+        "minmax":   same resize and padding, scaled with MedSAM's own per-image min-max via
+                    the exact function the trainer uses (src/normalization.min_max_normalize).
+        """
+        if self.normalization == "imagenet":
+            self.predictor.set_image(image_uint8)
+            return
+        import torch
+        # Mirror SamPredictor.set_image, normalizing AFTER the resize as MedSAM does.
+        resized = self.predictor.transform.apply_image(image_uint8)   # HWC uint8, long side 1024
+        normed = min_max_normalize(resized)                           # float32 in [0, 1]
+        tensor = (torch.as_tensor(normed, device=self.predictor.device)
+                  .permute(2, 0, 1).contiguous()[None, :, :, :])
+        with _identity_preprocess(self.predictor.model):
+            self.predictor.set_torch_image(tensor, image_uint8.shape[:2])
 
     # --- inference ---
     def predict_prob(self, image_uint8: np.ndarray, gt_binary: np.ndarray) -> np.ndarray:
@@ -116,7 +158,7 @@ class ZeroShotSAM:
         if box is None and point_coords is None:  # empty GT → empty prediction
             return np.zeros((h, w), dtype=np.float32)
 
-        self.predictor.set_image(image_uint8)
+        self._set_image(image_uint8)
         masks, _scores, _logits = self.predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
@@ -142,6 +184,7 @@ def build_zeroshot_sam(
     device: str = "cuda",
     prompt: str = "box",
     box_padding: int = 5,
+    normalization: str = "imagenet",
 ) -> ZeroShotSAM:
     """
     Load a raw SAM checkpoint (no LoRA, no decoder) and wrap it for prompted inference.
@@ -158,7 +201,8 @@ def build_zeroshot_sam(
         p.requires_grad_(False)
     sam.to(device).eval()
     return ZeroShotSAM(SamPredictor(sam), model_type=model_type,
-                       prompt=prompt, box_padding=box_padding, checkpoint=checkpoint)
+                       prompt=prompt, box_padding=box_padding, checkpoint=checkpoint,
+                       normalization=normalization)
 
 
 def build_zeroshot_medsam(
@@ -166,10 +210,16 @@ def build_zeroshot_medsam(
     device: str = "cuda",
     prompt: str = "box",
     box_padding: int = 5,
+    normalization: str = "imagenet",
 ) -> ZeroShotSAM:
-    """MedSAM shares the SAM ViT-B architecture; only the weights differ."""
+    """MedSAM shares the SAM ViT-B architecture; only the weights differ.
+
+    Default stays `imagenet` deliberately — it reproduces the published `vanilla_medsam` oracle
+    row. Pass `normalization='minmax'` for MedSAM's own preprocessing (docs/MEDSAM_INVESTIGATION.md,
+    experiment A).
+    """
     return build_zeroshot_sam(checkpoint, model_type="vit_b", device=device,
-                              prompt=prompt, box_padding=box_padding)
+                              prompt=prompt, box_padding=box_padding, normalization=normalization)
 
 
 # ---------------------------------------------------------------------------
@@ -192,11 +242,15 @@ def predict_zeroshot_prob(zs: ZeroShotSAM, image_path, mask_path, img_size: int)
 
 
 def evaluate_zeroshot_all_splits(zs: ZeroShotSAM, splits: dict, img_size: int,
-                                 tracker_factory, split_labels: dict | None = None) -> dict:
+                                 tracker_factory, split_labels: dict | None = None,
+                                 on_split: Optional[Callable] = None) -> dict:
     """
     Evaluate a zero-shot baseline on every available split. Returns
     {split_key: {dice, iou, mae, wfm, sm, em}} — the same shape the trained models produce,
     so results merge straight into the benchmark's `all_results`.
+
+    ``on_split``, if given, is called as ``on_split(key, results[key])`` right after each split
+    finishes (e.g. to print a progress row as zeroshot_eval.py goes).
     """
     keys = list(split_labels.keys()) if split_labels else list(splits.keys())
     results: dict[str, dict] = {}
@@ -208,4 +262,6 @@ def evaluate_zeroshot_all_splits(zs: ZeroShotSAM, splits: dict, img_size: int,
             prob, gt = predict_zeroshot_prob(zs, ip, mp, img_size)
             tracker.update(prob, gt)
         results[key] = tracker.compute()
+        if on_split is not None:
+            on_split(key, results[key])
     return results

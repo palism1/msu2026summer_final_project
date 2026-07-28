@@ -31,6 +31,10 @@ MODEL_DISPLAY = {
     "medsam": "MedSAM-ViT-B + LoRA",
     "vanilla_sam": "SAM ViT-H (vanilla, oracle-box)",
     "vanilla_medsam": "MedSAM ViT-B (vanilla, oracle-box)",
+    "medsam_minmax": "MedSAM-ViT-B + LoRA (min-max norm)",
+    "medsam_ctrl": "MedSAM-ViT-B + LoRA (ImageNet norm, jitter control)",
+    "vanilla_sam_b": "SAM ViT-B (vanilla, oracle-box)",
+    "vanilla_medsam_minmax": "MedSAM ViT-B (vanilla, oracle-box, min-max norm)",
 }
 
 # Default Drive mirror layout written by train.py (src/config.py _DEFAULT_DRIVE_RESULTS).
@@ -42,11 +46,17 @@ DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
 TIER = {
     "vanilla_sam": "oracle",
     "vanilla_medsam": "oracle",
+    "vanilla_sam_b": "oracle",
+    "vanilla_medsam_minmax": "oracle",
 }
 
 
 def tier_of(model_dir: str) -> str:
-    return TIER.get(model_dir, "prompt-free")
+    """Oracle = untrained, GT-prompted baseline. Any results dir named vanilla_* is oracle by
+    convention, so a newly added baseline can never silently land in the fair table."""
+    if model_dir in TIER:
+        return TIER[model_dir]
+    return "oracle" if model_dir.startswith("vanilla") else "prompt-free"
 
 
 def _display_name(model_dir: str) -> str:
@@ -101,6 +111,7 @@ def flatten(model_dir: str, payload: dict) -> dict:
         "tier": tier_of(model_dir),
         "backbone": payload.get("backbone"),
         "seed": payload.get("seed"),
+        "normalization": payload.get("normalization"),
     }
     for s in ALL_SPLITS:
         row[s] = round(ev[s]["dice"], 6) if s in ev else None
@@ -182,18 +193,21 @@ def split_by_tier(agg: list[dict]) -> dict[str, list[dict]]:
 
 def build_zeroshot_payload(model_key: str, backbone: str, eval_results: dict,
                            total_params: int, device_name: str | None,
-                           prompt_protocol: str) -> dict:
+                           prompt_protocol: str, normalization: str | None = None) -> dict:
     """
     Build a metrics.json-shaped payload for an untrained (zero-shot) vanilla SAM/MedSAM oracle
     baseline, so it round-trips through discover_metrics/flatten exactly like a trained run's
     payload: 0 trainable params, no training time, and the oracle-box prompt protocol recorded
     for provenance. ``eval_results`` is ``{split_key: {"dice": ..., ...}}``, same shape
     MetricTracker.compute() returns and src/training/reporting.build_metrics_payload uses.
+
+    ``normalization`` is included only when not None, so 05_benchmark.ipynb's existing call
+    (which doesn't pass it) keeps producing the same payload shape as before.
     """
     mean_seen = _mean_over(eval_results, SEEN_SPLITS)
     mean_unseen = _mean_over(eval_results, UNSEEN_SPLITS)
     gap = (mean_seen - mean_unseen) if (mean_seen is not None and mean_unseen is not None) else None
-    return {
+    payload = {
         "model": model_key,
         "backbone": backbone,
         "seed": 0,
@@ -211,6 +225,9 @@ def build_zeroshot_payload(model_key: str, backbone: str, eval_results: dict,
         "prompt_protocol": prompt_protocol,
         "vanilla": True,
     }
+    if normalization is not None:
+        payload["normalization"] = normalization
+    return payload
 
 
 def write_zeroshot_metrics(results_root: str | Path, model_key: str, payload: dict) -> Path:
