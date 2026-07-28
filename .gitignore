@@ -12,5 +12,16 @@ dist/
 *.pt
 *.pth
 wandb/
-HANDOFF.md
 .DS_Store
+.pytest_cache/
+*.html
+
+# Local working notes and editor/tooling config — not part of the study
+HANDOFF.md
+RESUME_LOG.md
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+.vscode/
+.idea/

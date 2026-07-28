@@ -5,7 +5,7 @@ last_updated: 2026-07-28
 
 <!-- FILE MAP | Project plan & pick-up point: what's done, what's missing, and the exact next
      steps. Read this first when resuming work. Pairs with docs/DECISIONS.md (why choices were
-     made) and CLAUDE.md (repo map). Update the status table + checklist as items land.
+     made) and README.md (repo map). Update the status table + checklist as items land.
      Doc class: living — bump last_updated above on any substantive change (see DECISIONS.md). -->
 
 # Project Plan — Where to Pick Up

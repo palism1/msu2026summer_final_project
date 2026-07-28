@@ -14,7 +14,8 @@ from typing import Any, Optional
 
 import yaml
 
-# Pipeline stages, named once here so --dry-run and CLAUDE.md stay in sync. [DO NOT TOUCH]
+# Pipeline stages, named once here so --dry-run and the README's repo map stay in sync.
+# [DO NOT TOUCH]
 PIPELINE_STAGES = ("data pipeline", "model build", "train", "evaluate", "benchmark")
 
 NORMALIZATION_CHOICES = ("imagenet", "minmax")   # kept in sync with src/normalization.py

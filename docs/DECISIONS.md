@@ -115,9 +115,9 @@ current state or a historical record (convention borrowed from the stroke-burden
   `docs/FINDINGS.md` will be immutable once published.)
 - **append-only** (`status: append-only`) — this decisions log; entries are never rewritten, only
   added, and reversals come as new entries referencing the old one.
-- **Exempt:** `README.md` (GitHub renders it as the repo landing page) and `CLAUDE.md` (the agent repo
-  map, consumed as tooling); their git history is the authoritative timestamp. If a `last_updated`
-  field ever drifts, `git log -1 --format=%cs -- <file>` is the source of truth.
+- **Exempt:** `README.md` (GitHub renders it as the repo landing page, and it carries the repo map);
+  its git history is the authoritative timestamp. If a `last_updated` field ever drifts,
+  `git log -1 --format=%cs -- <file>` is the source of truth.
 
 ### Model-dependent input normalization + augmentation-matched control arm — 2026-07-28 [DO NOT TOUCH the legacy keys]
 Fixes H1 from `docs/MEDSAM_INVESTIGATION.md`: `src/data/transforms.py` applied ImageNet
