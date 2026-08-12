@@ -1,6 +1,6 @@
 ---
 status: living
-last_updated: 2026-07-28
+last_updated: 2026-08-12
 ---
 
 <!-- FILE MAP | Project plan & pick-up point: what's done, what's missing, and the exact next
@@ -13,39 +13,41 @@ last_updated: 2026-07-28
 **Study:** Can LoRA-adapted SAM (and MedSAM) match specialist polyp networks on the PraNet
 benchmark while degrading less on unseen datasets — and at what training / model-size / compute cost?
 
-**Last updated:** 2026-07-28
+**Last updated:** 2026-08-12
 
 ---
 
 ## TL;DR — where we are
 
-**Full results are in** (U-Net, SAM ViT-H + LoRA, SAM ViT-B + LoRA, MedSAM ViT-B + LoRA, three seeds
-each, plus the two published oracle-box baselines) — see `docs/FINDINGS.md`. Among the *prompt-free*
-models, SAM-ViT-H + LoRA generalizes best (0.806 unseen mDice vs U-Net 0.755) at 0.4% of the
-parameters; MedSAM-ViT-B + LoRA trails every model, including the smaller-backbone SAM-ViT-B + LoRA.
+**All runs are complete.** Six trained models (U-Net, SAM ViT-H + LoRA, SAM ViT-B + LoRA, MedSAM
+ViT-B + LoRA, MedSAM min-max, MedSAM ctrl; three seeds each) and four oracle-box baselines (vanilla
+SAM, vanilla MedSAM, vanilla SAM-B, vanilla MedSAM min-max) all have numbers in
+`results/summary/SUMMARY.md` (20 runs, regenerated 2026-08-12). See `docs/FINDINGS.md` for the
+write-up.
 
-**Open question raised in review (2026-07-28, `docs/MEDSAM_INVESTIGATION.md`):** MedSAM's deficit was
-partly attributed to "medical pretraining is a net drag," but the training pipeline fed MedSAM's
-frozen encoder ImageNet-standardized inputs when MedSAM was fit on per-image `[0,1]` min-max inputs —
-a normalization bug (H1) that could account for some or all of the gap. Fixed in code: normalization
-and augmentation policy are now bound to the model key (`src/config.MODEL_SPECS`), and three new
-experiments isolate the confound:
+Headline unseen mDice, three-seed means: SAM-ViT-H + LoRA 0.806, SAM-ViT-B + LoRA 0.761, U-Net
+0.755, MedSAM + LoRA 0.661, MedSAM min-max 0.725, MedSAM ctrl 0.655. Oracle-box baselines (untrained):
+vanilla MedSAM min-max 0.925, vanilla SAM 0.905, vanilla SAM-B 0.880, vanilla MedSAM 0.845.
 
-- **A — vanilla MedSAM under its own preprocessing** (`vanilla_medsam_minmax`, no training, ~2 min).
-- **B — vanilla SAM-ViT-B oracle-box baseline** (`vanilla_sam_b`, no training, ~2 min) — fills the
-  missing cell of the 2x2.
+**Resolved (was open, 2026-07-28, `docs/MEDSAM_INVESTIGATION.md`):** MedSAM's original deficit was
+partly attributed to "medical pretraining is a net drag." Part of that deficit was a normalization
+bug: the training pipeline fed MedSAM's frozen encoder ImageNet-standardized inputs, but MedSAM was
+fit on per-image `[0,1]` min-max inputs. The fix is in code: normalization and augmentation policy are
+now bound to the model key (`src/config.MODEL_SPECS`). Three experiments isolated the confound and are
+now complete:
+
+- **A — vanilla MedSAM under its own preprocessing** (`vanilla_medsam_minmax`). Done.
+- **B — vanilla SAM-ViT-B oracle-box baseline** (`vanilla_sam_b`). Done. Fills the last cell of the 2x2.
 - **C — MedSAM + LoRA retrained under a three-arm design** (`medsam_minmax` + `medsam_ctrl`, 3 seeds
-  each, ~95 min A100 total) — `medsam_ctrl` is an augmentation-matched control, needed because
-  min-max normalization is exactly invariant to ColorJitter's brightness/contrast (see
-  `docs/MEDSAM_INVESTIGATION.md`, H1 addendum).
+  each). Done. `medsam_ctrl` is an augmentation-matched control, needed because min-max normalization
+  is exactly invariant to ColorJitter's brightness/contrast (see `docs/MEDSAM_INVESTIGATION.md`, H1
+  addendum).
 
-None of A/B/C have GPU numbers yet. Published paths (`checkpoints/medsam/`, `results/medsam/`,
-`results/vanilla_sam/`, `results/vanilla_medsam/`) are untouched — the new experiments write to new
-model keys / baseline names only.
+The normalization bug explains part of the original gap: MedSAM min-max recovers +0.070 unseen Dice
+over MedSAM + LoRA (0.655 to 0.725). The remaining −0.036 against generic SAM at the same backbone is
+the true pretraining effect.
 
-**Pick up at:** [Run & train](#run--train-the-only-remaining-work) — run experiments A, B, then C on
-Colab (see `docs/MEDSAM_INVESTIGATION.md` "How to run these" for exact commands), re-run
-`aggregate_results.py`, then update the caveat in `docs/FINDINGS.md`.
+**Pick up at:** presentation prep. See `docs/PRESENTATION_OUTLINE.md` for the current deck plan.
 
 ---
 
@@ -63,10 +65,10 @@ each model is, and look into costs (training time, hardware needed).*
 | Run each on the **same GPU** | Done | `train.py` one protocol; `metrics.json` records `device` / `device_name` |
 | Report **how big** each model is | Done | `metrics.json` params + `checkpoint_size_mb`; benchmark prints a 5-model param table |
 | **Cost**: how long to train, what HW | Done | `metrics.json → timing` + `device_name` |
-| Compare **with fine-tuning and without** | **Code done — awaiting run** | Zero-shot path built (`src/models/zeroshot.py`); wired into `05_benchmark.ipynb` |
-| 4-way: vanilla SAM, vanilla MedSAM, fine-tuned SAM, fine-tuned MedSAM | **Code done — awaiting run** | All 5 models (2×2 + U-Net) in the benchmark's `all_models`; runs once checkpoints exist |
+| Compare **with fine-tuning and without** | Done | Zero-shot path (`src/models/zeroshot.py`); results in `results/summary/SUMMARY.md` |
+| 4-way: vanilla SAM, vanilla MedSAM, fine-tuned SAM, fine-tuned MedSAM | Done | All models and baselines have run; see `docs/FINDINGS.md` |
 
-Every requirement is implemented. The last two now just need a GPU run to produce the actual numbers.
+Every requirement is implemented and has numbers.
 
 ---
 
@@ -91,28 +93,19 @@ Every requirement is implemented. The last two now just need a GPU run to produc
 
 ---
 
-## Run & train — the only remaining work
+## Run & train — complete
 
-Everything below needs a GPU; no more code changes are required.
+All training and baseline runs are done. The six-model comparison (U-Net, SAM-ViT-H + LoRA,
+SAM-ViT-B + LoRA, MedSAM-ViT-B + LoRA, MedSAM min-max, MedSAM ctrl; three seeds each) plus the four
+oracle-box baselines are in `results/summary/SUMMARY.md`. See `docs/FINDINGS.md` for the write-up and
+`docs/MEDSAM_INVESTIGATION.md` for what each comparison answers.
 
-The original five-model comparison (U-Net, SAM-ViT-H + LoRA, SAM-ViT-B + LoRA, MedSAM-ViT-B + LoRA,
-three seeds each, plus the two published oracle-box baselines) is **done** — see `docs/FINDINGS.md`.
-What's left is experiments A, B, C from `docs/MEDSAM_INVESTIGATION.md` (~190 min A100 total,
-~2.1 GB Drive), run in that order since A determines whether C is a correction or an ablation:
+Experiments A, B, C (isolating the MedSAM normalization confound) are also complete:
 
-1. **A — vanilla MedSAM under its own preprocessing** (no training, ~2 min):
-   `python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_medsam_minmax`.
-2. **B — vanilla SAM-ViT-B oracle-box baseline** (no training, ~2 min):
-   `python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b`.
-3. **C — MedSAM + LoRA retrained under the three-arm design** (3 seeds x 2 arms, ~95 min A100):
-   train `medsam_minmax` and `medsam_ctrl` together at seeds 42/43/44, via
-   `notebooks/train_colab.ipynb` (`MODELS = ['medsam_minmax', 'medsam_ctrl']`) or
-   `python train.py --config configs/run.yaml --model <medsam_minmax|medsam_ctrl> --seed <N>`.
-4. **Consolidate** — `python aggregate_results.py` (no GPU, no notebook re-run).
-
-Exact commands and what each comparison answers: `docs/MEDSAM_INVESTIGATION.md` → "How to run
-these". All three write to new model keys / baseline names — `checkpoints/medsam/`,
-`results/medsam/`, `results/vanilla_sam/`, `results/vanilla_medsam/` are untouched by design.
+1. **A — vanilla MedSAM under its own preprocessing.** Done.
+2. **B — vanilla SAM-ViT-B oracle-box baseline.** Done.
+3. **C — MedSAM + LoRA retrained under the three-arm design** (3 seeds x 2 arms). Done.
+4. **Consolidated** — `python aggregate_results.py` (regenerated 2026-08-12).
 
 ---
 
@@ -158,10 +151,8 @@ Offline check: `python train.py --config configs/run.yaml --dry-run`.
 - [x] Diagnose the MedSAM normalization bug (H1) and land the fix in code
   (`src/normalization.py`, `src/config.MODEL_SPECS`, `zeroshot_eval.py`) — `docs/DECISIONS.md`,
   `docs/MEDSAM_INVESTIGATION.md`
-- [ ] Run experiment A — `vanilla_medsam_minmax` (no training, ~2 min)
-- [ ] Run experiment B — `vanilla_sam_b` (no training, ~2 min)
-- [ ] Run experiment C — `medsam_minmax` + `medsam_ctrl`, 3 seeds each (~95 min A100)
-- [ ] Re-run `aggregate_results.py` to absorb the new rows
-- [ ] Update the `docs/FINDINGS.md` normalization caveat with the A/B/C results; retract or confirm
-  the "medical pretraining is a net drag" line depending on what `medsam_ctrl` -> `medsam_minmax`
-  shows
+- [x] Run experiment A — `vanilla_medsam_minmax`
+- [x] Run experiment B — `vanilla_sam_b`
+- [x] Run experiment C — `medsam_minmax` + `medsam_ctrl`, 3 seeds each
+- [x] Re-run `aggregate_results.py` to absorb the new rows
+- [x] Update the `docs/FINDINGS.md` normalization caveat with the A/B/C results
