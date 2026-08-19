@@ -1,6 +1,8 @@
 /data/
 /checkpoints/
 /results/
+/cache/
+/.venv-test/
 runs/
 __pycache__/
 *.pyc

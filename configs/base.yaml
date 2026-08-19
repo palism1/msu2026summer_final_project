@@ -79,3 +79,10 @@ zeroshot:              # untrained oracle-box baselines, run by zeroshot_eval.py
     vanilla_sam_b: sam_vit_b_01ec64.pth        # experiment B
     vanilla_medsam: medsam_vit_b.pth
     vanilla_medsam_minmax: medsam_vit_b.pth    # experiment A — same file, MedSAM's own [0,1] norm
+
+ensemble:
+  cache_dir: cache          # [TWEAK] per-image probability cache; large, gitignored
+  weight_grid_step: 0.05    # [TWEAK] simplex grid resolution for fitted weights
+cascade:
+  box_padding: 5             # matches zeroshot.box_padding so the cascade and its ceiling agree
+  detector_threshold: 0.5
