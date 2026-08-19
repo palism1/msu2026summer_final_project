@@ -93,3 +93,29 @@ def test_zeroshot_accepts_minmax():
 def test_zeroshot_rejects_unknown_normalization():
     with pytest.raises(ValueError):
         ZeroShotSAM(_DummyPredictor(), model_type="vit_b", normalization="zscore")
+
+
+# ---------------------------------------------------------------------------
+# Regression: predict_prob's box path must go through the new public
+# predict_prob_from_box (src/ensemble/cascade.py reuses this same method).
+# ---------------------------------------------------------------------------
+
+def test_predict_prob_calls_predict_prob_from_box_with_the_derived_box(square_mask):
+    zs = ZeroShotSAM(_DummyPredictor(), model_type="vit_b", prompt="box", box_padding=0)
+    calls = []
+
+    def fake_predict_prob_from_box(image_uint8, box, out_hw):
+        calls.append((image_uint8, box, out_hw))
+        return np.zeros(out_hw, dtype=np.float32)
+
+    zs.predict_prob_from_box = fake_predict_prob_from_box
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+
+    zs.predict_prob(image, square_mask)
+
+    assert len(calls) == 1
+    called_image, called_box, called_out_hw = calls[0]
+    assert called_image is image
+    assert called_out_hw == square_mask.shape[:2]
+    expected_box = box_from_mask(square_mask, padding=0)
+    assert called_box.tolist() == expected_box.tolist()

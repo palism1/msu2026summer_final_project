@@ -140,6 +140,29 @@ class ZeroShotSAM:
             self.predictor.set_torch_image(tensor, image_uint8.shape[:2])
 
     # --- inference ---
+    def predict_prob_from_box(self, image_uint8: np.ndarray, box: Optional[np.ndarray],
+                              out_hw: tuple) -> np.ndarray:
+        """
+        Segment `image_uint8` (H×W×3 uint8 RGB) using a pre-derived XYXY `box` prompt (or no
+        prompt at all when `box` is None — an empty detection). Returns an `out_hw` probability
+        map in [0, 1] (sigmoid of SAM's mask logits). Public so the box cascade
+        (src/ensemble/cascade.py) can reuse this exact prompt-to-probability path with a box
+        derived from a detector's prediction instead of the ground truth.
+        """
+        h, w = out_hw
+        if box is None:
+            return np.zeros((h, w), dtype=np.float32)
+
+        self._set_image(image_uint8)
+        masks, _scores, _logits = self.predictor.predict(
+            point_coords=None,
+            point_labels=None,
+            box=box[None, :],
+            multimask_output=False,
+            return_logits=True,   # raw mask logits at image resolution
+        )
+        return _sigmoid(masks[0]).astype(np.float32)
+
     def predict_prob(self, image_uint8: np.ndarray, gt_binary: np.ndarray) -> np.ndarray:
         """
         Segment `image_uint8` (H×W×3 uint8 RGB) using a prompt derived from `gt_binary`
@@ -149,20 +172,18 @@ class ZeroShotSAM:
         h, w = gt_binary.shape[:2]
         if self.prompt == "box":
             box = box_from_mask(gt_binary, padding=self.box_padding)
-            point_coords = point_labels = None
-        else:
-            box = None
-            point_coords = point_from_mask(gt_binary)
-            point_labels = None if point_coords is None else np.ones(len(point_coords), dtype=np.int64)
+            return self.predict_prob_from_box(image_uint8, box, (h, w))
 
-        if box is None and point_coords is None:  # empty GT → empty prediction
+        point_coords = point_from_mask(gt_binary)
+        point_labels = None if point_coords is None else np.ones(len(point_coords), dtype=np.int64)
+        if point_coords is None:  # empty GT → empty prediction
             return np.zeros((h, w), dtype=np.float32)
 
         self._set_image(image_uint8)
         masks, _scores, _logits = self.predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
-            box=None if box is None else box[None, :],
+            box=None,
             multimask_output=False,
             return_logits=True,   # raw mask logits at image resolution
         )
