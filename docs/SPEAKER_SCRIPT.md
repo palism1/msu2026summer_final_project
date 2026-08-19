@@ -7,8 +7,9 @@ last_updated: 2026-08-19
 
 Read this aloud as written, or use it as the spine and improvise around it.
 Each block names the slide, gives a time budget, and marks chart walkthroughs
-with **[CHART]**. Total spoken time at a normal pace: about 16 minutes. To get
-back under 15, trim the "How they differ" paragraph on slide 5.
+with **[CHART]**. Total spoken time at a normal pace: about 16 and a half
+minutes. To get closer to 15, trim the "How they differ" paragraph on slide 5
+and the U-Net background paragraph on slide 7.
 
 Numbers come from `results/summary/SUMMARY.md` (22 runs: 18 trained + 4 oracle; A100, seeds 42/43/44).
 
@@ -125,7 +126,7 @@ The details at the bottom: 352 by 352 inputs, Dice plus cross-entropy loss,
 best-validation checkpointing, and every number you will see is a mean over
 seeds 42, 43, and 44.
 
-## Slide 7 · Method · 1:30
+## Slide 7 · Method · 1:45
 
 This slide is the method, and it needs one piece of background. A neural
 network is a stack of layers, and each layer holds millions of numbers called
@@ -149,8 +150,16 @@ features into a polyp outline. The trainable part, adapters plus decoder, is
 time the model receives the raw image and nothing else: no clicks, no boxes,
 the same conditions the U-Net gets.
 
-The U-Net baseline trains with the same loss, the same data, and the same
-schedule, so the only difference is the architecture.
+The U-Net baseline deserves the same one piece of background. A U-Net is the
+standard network for medical image segmentation, a decade old and used
+everywhere. It is shaped like a funnel and its mirror: the first half shrinks
+the image step by step to take in the whole scene, the second half grows it
+back to full size to draw the outline, and skip connections carry the fine
+detail straight across between the matching steps. Ours starts from an encoder
+pretrained on everyday photographs, and then every one of its 24.4 million
+weights is free to change; nothing is frozen. It trains with the same loss,
+the same data, and the same schedule, so the difference between the two arms
+is the architecture and how much of it moves.
 
 ## Slide 8 · Result 1, familiar data · 1:00
 
