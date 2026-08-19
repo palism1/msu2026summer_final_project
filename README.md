@@ -44,17 +44,25 @@ We compare:
 │   │   ├── unet.py            # U-Net via segmentation-models-pytorch
 │   │   ├── sam_adapter.py     # SAM + LoRA + lightweight decoder
 │   │   └── zeroshot.py        # Untrained oracle-box SAM/MedSAM baselines
-│   └── training/
-│       ├── engine.py          # Config-driven training loop (all models)
-│       └── reporting.py       # Writes metrics.json, mask overlays, run.log
+│   ├── training/
+│   │   ├── engine.py          # Config-driven training loop (all models)
+│   │   └── reporting.py       # Writes metrics.json, mask overlays, run.log
+│   └── ensemble/
+│       ├── cache.py           # Per-image probability cache (torch-free)
+│       ├── combine.py         # Weighted averaging, evaluation, weight fitting (torch-free)
+│       └── cascade.py         # Box cascade: largest-component box derivation (torch-free)
 ├── notebooks/
 │   ├── 01_data_pipeline.ipynb     # Download data, verify splits (run once)
 │   ├── train_colab.ipynb          # Colab wrapper: pick models/seeds in cell 1, runs train.py
 │   ├── 05_benchmark.ipynb         # Compare all trained models side by side
-│   └── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   ├── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   └── 08_ensemble.ipynb          # Ensembles + box cascade: restore results, run Phases 1-4
 ├── train.py                   # CLI training entry point
 ├── evaluate.py                # CLI evaluation (all 5 splits)
 ├── zeroshot_eval.py           # CLI untrained oracle-box baseline evaluator
+├── predict_cache.py           # CLI per-image probability cache builder (Phase 0/1 gate + cache)
+├── ensemble_eval.py           # CLI ensemble evaluator (uniform + fitted weights)
+├── cascade_eval.py            # CLI box cascade evaluator (detector row + GT-box ceiling row)
 ├── aggregate_results.py       # Consolidate results -> results/summary (no GPU, no re-run)
 └── requirements.txt
 ```
@@ -121,6 +129,15 @@ python zeroshot_eval.py --config configs/run.yaml --baseline vanilla_sam_b --dry
 
 # Consolidate every run's metrics.json into results/summary/ (no GPU, no notebook re-run)
 python aggregate_results.py
+
+# Ensembles + box cascade (notebooks/08_ensemble.ipynb runs all three end to end)
+python predict_cache.py --inventory                              # Phase 0 gate (needs torch)
+python predict_cache.py --config configs/run.yaml --model unet --seed 42 --dry-run  # torch-free
+python ensemble_eval.py --self-check --member unet --seed 42     # cache reproduces the published row
+python ensemble_eval.py --spec ens_unet_samh --seed 42           # uniform ensemble
+python ensemble_eval.py --spec ens_unet_samh_fitted --seed 42    # weights fit on seen data only
+python cascade_eval.py --spec oracle_casc_gtbox_medsam           # GT-box ceiling (run first as a gate)
+python cascade_eval.py --spec casc_unet_medsam --seed 42         # U-Net box -> MedSAM cascade
 ```
 
 ---

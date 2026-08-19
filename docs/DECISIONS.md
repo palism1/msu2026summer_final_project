@@ -1,6 +1,6 @@
 ---
 status: append-only
-last_updated: 2026-07-28
+last_updated: 2026-08-19
 ---
 
 <!-- FILE MAP | Decision log: notable choices, why they were made, and when.
@@ -167,3 +167,69 @@ must never silently clobber the published numbers.
 (`src/normalization.py`, `src/data/transforms.py`, `src/config.py`, `src/models/zeroshot.py`,
 `zeroshot_eval.py`, `src/training/engine.py`, `src/training/reporting.py`, `train.py`,
 `evaluate.py`, `src/results_summary.py`, `docs/MEDSAM_INVESTIGATION.md`)
+
+### Ensemble, weighted ensemble, and box cascade — pre-registration and design choices — 2026-08-19
+Pre-registered before any ensemble or cascade number was computed, per `docs/PLAN_ENSEMBLE.md`.
+Written here first so a later result cannot be read as having driven the design.
+
+**Member sets.** Member set A is U-Net plus SAM-ViT-H — the largest architectural distance in
+the study. Member set B is the top three rows of the current unseen leaderboard: SAM-ViT-H,
+SAM-ViT-B, U-Net. Both sets get a uniform arm (`ens_unet_samh`, `ens_top3`) and a fitted arm
+(`ens_unet_samh_fitted`, `ens_top3_fitted`). All four arms are reported, whatever the outcome —
+uniform approximately equal to fitted is an acceptable, reportable result, not a failed
+experiment.
+
+**Fit slice is the first contiguous half of each seen test split, in sorted path order** —
+Kvasir indices 0-49 fit, 50-99 hold out; ClinicDB indices 0-30 fit, 31-61 hold out
+(`fit_holdout_indices`, `src/ensemble/combine.py`). Not an interleaved (even/odd) split:
+CVC-ClinicDB's 62 seen-test images come from a handful of video sequences, so an interleaved
+split would place near-duplicate frames from the same sequence on both sides of the fit/holdout
+boundary, leaking sequence identity into the weight fit. A contiguous split keeps whole
+sequences on one side. This costs some statistical similarity between the two halves; that cost
+is accepted because the risk being guarded against is leakage, not power. The primary endpoint
+for every ensemble row stays the untouched unseen test sets (CVC-ColonDB, ETIS-Larib, CVC-300),
+which the fit slice never touches.
+
+**Three-tier table split, not two.** `src/results_summary.py` already separated trained
+(`prompt-free`) from untrained, GT-prompted (`oracle`) rows. Ensembles and the cascade add a
+third tier, `derived` (`TIER`, `tier_of`, `split_by_tier`). They read no ground truth at
+inference, so they are fair on accuracy against the prompt-free tier — but each one costs more
+compute than any single member and is a combination of the models above rather than a new
+architecture, so it is not a peer for a "which architecture generalizes better" table either. The
+three tiers are never merged into one ranked table; the derived section's caption names the best
+single-model unseen mDice inline so a reader can compare without the tables being merged.
+
+**Empty-box policy defaults to "zero".** When the box cascade's detector proposes no box (an
+empty thresholded mask), the cascade writes an all-zero probability map rather than falling back
+to the detector's own prediction (`empty_policy="zero"`, `src/ensemble/cascade.py`). The method
+invents no detection it did not make. A `"passthrough"` policy exists as a documented ablation,
+used only if the empty rate on any split exceeds 2 percent.
+
+**Detector provenance is the float16 prediction cache, not a live U-Net forward pass.** The
+cascade reads U-Net's cached probability map from Phase 1 (`predict_cache.py`'s output) to derive
+its box, the same array the ensemble's U-Net member uses. This is deliberate — it lets the
+cascade run without ever loading the U-Net checkpoint, and it keeps the detector output
+consistent across every consumer of that cache. The cached values carry float16 rounding: a
+boundary pixel within about 1e-3 of the 0.5 threshold can flip, which can move a box edge by one
+pixel. With `box_padding=5` (matching `zeroshot.box_padding`) the effect on the derived box is
+nil. This is *not* claimed to be byte-identical to a live U-Net forward pass — only that both
+cascade rows (fair and ceiling) share one image loader and one cached-probability convention, so
+the comparison between them is apples-to-apples.
+
+**"Oracle box into the trained models" does not exist as a row.** `SAMLoRA` (the trained SAM/
+MedSAM architecture) discards SAM's prompt encoder and mask decoder in favor of
+`LightDecoder(encoder_features)` — it has no box input, and neither does U-Net. The row is
+architecturally unavailable, not merely unrun. Its intent — an oracle-prompted ceiling for the
+cascade — is served instead by the existing `vanilla_medsam_minmax` oracle row (0.9246 unseen
+mDice) and by Phase 4's `oracle_casc_gtbox_medsam`, a cheap path-matched reproduction of that
+ceiling built through the same image loader and box-derivation code the fair cascade row uses.
+
+**Weighting stays seed-matched; the decision threshold stays at 0.5.** Ensemble seed 42 combines
+each member at seed 42 only — cross-seed pooling is a different question (ensemble-of-seeds) and
+is out of scope. Every published row, fitted or uniform, thresholds at 0.5; a fitted threshold
+would be a second confound layered on top of fitted weights. Phase 3 records a threshold
+sensitivity sweep (0.3-0.7) on the fit slice only, as a diagnostic, not as a second knob.
+
+(`src/ensemble/cache.py`, `src/ensemble/combine.py`, `src/ensemble/cascade.py`, `src/config.py`,
+`src/models/zeroshot.py`, `src/results_summary.py`, `predict_cache.py`, `ensemble_eval.py`,
+`cascade_eval.py`, `docs/PLAN_ENSEMBLE.md`)
