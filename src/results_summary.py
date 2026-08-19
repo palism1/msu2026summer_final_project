@@ -35,32 +35,69 @@ MODEL_DISPLAY = {
     "medsam_ctrl": "MedSAM-ViT-B + LoRA (ImageNet norm, jitter control)",
     "vanilla_sam_b": "SAM ViT-B (vanilla, oracle-box)",
     "vanilla_medsam_minmax": "MedSAM ViT-B (vanilla, oracle-box, min-max norm)",
+    "ens_unet_samh": "Ensemble: U-Net + SAM-ViT-H (uniform)",
+    "ens_unet_samh_fitted": "Ensemble: U-Net + SAM-ViT-H (fitted)",
+    "ens_top3": "Ensemble: top-3 (uniform)",
+    "ens_top3_fitted": "Ensemble: top-3 (fitted)",
+    "casc_unet_medsam": "Cascade: U-Net box -> MedSAM min-max",
+    "oracle_casc_gtbox_medsam": "Cascade: GT box -> MedSAM min-max (path-matched ceiling)",
 }
 
 # Default Drive mirror layout written by train.py (src/config.py _DEFAULT_DRIVE_RESULTS).
 DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
 
 # Tier split: "oracle" = untrained, GT-box-prompted zero-shot baselines (upper bound, not a fair
-# peer); everything else defaults to "prompt-free" (trained, no prompt hint at eval time). Never
-# merge these into one ranked table — see render_markdown / split_by_tier.
+# peer); "derived" = ensembles and the cascade (combinations of the models above; no ground truth
+# at inference, but not a peer of a single trained model either — see render_markdown /
+# split_by_tier); everything else defaults to "prompt-free" (trained, no prompt hint at eval time).
+# Never merge these three into one ranked table.
 TIER = {
     "vanilla_sam": "oracle",
     "vanilla_medsam": "oracle",
     "vanilla_sam_b": "oracle",
     "vanilla_medsam_minmax": "oracle",
+    "ens_unet_samh": "derived",
+    "ens_unet_samh_fitted": "derived",
+    "ens_top3": "derived",
+    "ens_top3_fitted": "derived",
+    "casc_unet_medsam": "derived",
+    "oracle_casc_gtbox_medsam": "oracle",
 }
 
 
 def tier_of(model_dir: str) -> str:
-    """Oracle = untrained, GT-prompted baseline. Any results dir named vanilla_* is oracle by
-    convention, so a newly added baseline can never silently land in the fair table."""
+    """Oracle = untrained, GT-prompted baseline. Derived = an ensemble or cascade of the models
+    above. Any results dir named vanilla_*/oracle_* is oracle, and any named ens_*/casc_* is
+    derived, by convention — so a newly added baseline or combination can never silently land in
+    the fair prompt-free table."""
     if model_dir in TIER:
         return TIER[model_dir]
-    return "oracle" if model_dir.startswith("vanilla") else "prompt-free"
+    if model_dir.startswith(("vanilla", "oracle")):
+        return "oracle"
+    if model_dir.startswith(("ens_", "casc_")):
+        return "derived"
+    return "prompt-free"
 
 
 def _display_name(model_dir: str) -> str:
     return MODEL_DISPLAY.get(model_dir, model_dir)
+
+
+def _merge_inference_sidecar(payload: dict, mpath: Path) -> dict:
+    """Merge a sibling ``inference.json`` into ``payload["inference"]``, but only when the payload
+    has no inline ``inference`` key already. Reads the sidecar from ``mpath.parent`` — the same
+    directory that supplied this row — so a Drive-sourced row never picks up a local sidecar for
+    a different run. Published rows (no sidecar on disk) pass through untouched."""
+    if "inference" in payload:
+        return payload
+    sidecar = mpath.parent / "inference.json"
+    if not sidecar.is_file():
+        return payload
+    try:
+        inference = json.loads(sidecar.read_text())
+    except (json.JSONDecodeError, OSError):
+        return payload
+    return {**payload, "inference": inference}
 
 
 def discover_metrics(roots: Iterable[str | Path]) -> dict[tuple[str, int], tuple[dict, str]]:
@@ -70,6 +107,8 @@ def discover_metrics(roots: Iterable[str | Path]) -> dict[tuple[str, int], tuple
     Roots are tried in order; the FIRST root that has a given ``(model_dir, seed)`` wins, so pass
     local ``results/`` before the Drive mirror to prefer local copies. Returns a dict keyed by
     ``(model_dir, seed)`` -> (parsed payload, source path str). Missing roots are skipped silently.
+    A sibling ``inference.json`` next to the chosen ``metrics.json`` is merged into
+    ``payload["inference"]`` (see ``_merge_inference_sidecar``).
     """
     found: dict[tuple[str, int], tuple[dict, str]] = {}
     for root in roots:
@@ -90,6 +129,7 @@ def discover_metrics(roots: Iterable[str | Path]) -> dict[tuple[str, int], tuple
                 payload = json.loads(mpath.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
+            payload = _merge_inference_sidecar(payload, mpath)
             found[key] = (payload, str(mpath))
     return found
 
@@ -128,6 +168,21 @@ def flatten(model_dir: str, payload: dict) -> dict:
     row["epochs_run"] = timing.get("epochs_run")
     row["train_minutes"] = round(total_s / 60, 2) if total_s is not None else None
     row["device_name"] = payload.get("device_name")
+
+    # Always set, defaulting to None — load-bearing. _write_csv derives its field names from
+    # rows[0].keys(); a key present only on a later row is dropped by DictWriter with no error,
+    # silently losing the column from summary_flat.csv / summary.json (see module FILE MAP).
+    inference = payload.get("inference") or {}
+    row["infer_gpu_seconds_per_image"] = inference.get("gpu_seconds_per_image")
+    row["infer_n_images"] = inference.get("n_images")
+    if row["infer_gpu_seconds_per_image"] is not None and row["mean_unseen_dice"] is not None:
+        gps = row["infer_gpu_seconds_per_image"]
+        row["unseen_dice_per_gpu_second"] = (
+            round(row["mean_unseen_dice"] / gps, 6) if gps else None
+        )
+    else:
+        row["unseen_dice_per_gpu_second"] = None
+    row["accepted_drift"] = inference.get("accepted_drift") or payload.get("accepted_drift")
     return row
 
 
@@ -138,6 +193,8 @@ _AGG_METRICS = (
     "mean_unseen_dice",
     "generalization_gap_dice",
     "train_minutes",
+    "infer_gpu_seconds_per_image",
+    "unseen_dice_per_gpu_second",
 )
 
 
@@ -163,6 +220,7 @@ def aggregate_by_model(rows: list[dict]) -> list[dict]:
             "n_seeds": len(group),
             "seeds": seeds,
             "trainable_params": group[0].get("trainable_params"),
+            "accepted_drift": any(r.get("accepted_drift") for r in group),
         }
         for metric in _AGG_METRICS:
             vals = [r[metric] for r in group if r.get(metric) is not None]
@@ -180,12 +238,13 @@ def aggregate_by_model(rows: list[dict]) -> list[dict]:
 
 
 def split_by_tier(agg: list[dict]) -> dict[str, list[dict]]:
-    """Split aggregated rows into {"prompt-free": [...], "oracle": [...]}, order preserved.
+    """Split aggregated rows into {"prompt-free": [...], "derived": [...], "oracle": [...]},
+    order preserved.
 
     ``aggregate_by_model`` already sorts by mean unseen Dice descending, so each tier's slice
-    comes out sorted too — no re-sort needed. Never combine these two lists into one table:
+    comes out sorted too — no re-sort needed. Never combine these three lists into one table:
     that's the whole point of the tier split (see module docstring / TIER)."""
-    out: dict[str, list[dict]] = {"prompt-free": [], "oracle": []}
+    out: dict[str, list[dict]] = {"prompt-free": [], "derived": [], "oracle": []}
     for e in agg:
         out.setdefault(tier_of(e["model_dir"]), []).append(e)
     return out
@@ -230,13 +289,78 @@ def build_zeroshot_payload(model_key: str, backbone: str, eval_results: dict,
     return payload
 
 
-def write_zeroshot_metrics(results_root: str | Path, model_key: str, payload: dict) -> Path:
-    """Write a zero-shot baseline payload to ``<results_root>/<model_key>/seed0/metrics.json``."""
-    out_dir = Path(results_root) / model_key / "seed0"
+def write_run_metrics(results_root: str | Path, model_key: str, seed: int, payload: dict) -> Path:
+    """Write any run's payload to ``<results_root>/<model_key>/seed<seed>/metrics.json``.
+
+    The one writer every caller (train.py, zeroshot_eval.py, ensemble_eval.py, cascade_eval.py)
+    goes through, so the path scheme lives in exactly one place."""
+    out_dir = Path(results_root) / model_key / f"seed{seed}"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "metrics.json"
     path.write_text(json.dumps(payload, indent=2))
     return path
+
+
+def write_zeroshot_metrics(results_root: str | Path, model_key: str, payload: dict) -> Path:
+    """Write a zero-shot baseline payload to ``<results_root>/<model_key>/seed0/metrics.json``.
+
+    Delegates to write_run_metrics with seed=0, so 05_benchmark.ipynb keeps working unchanged."""
+    return write_run_metrics(results_root, model_key, 0, payload)
+
+
+def build_derived_payload(model_key: str, seed: int, eval_results: dict,
+                          member_payloads: list[dict], backbones: list[str],
+                          normalizations: list[str], device_name: str | None = None,
+                          extras: dict | None = None) -> dict:
+    """
+    Build a metrics.json-shaped payload for a derived method (ensemble or cascade) — an
+    accuracy-fair, more-expensive combination of the trained models above. Field rules
+    (docs/PLAN_ENSEMBLE.md Phase 2):
+
+    - params.trainable / params.total: summed over members (the method costs all of them).
+    - checkpoint_size_mb: summed over members (download footprint).
+    - timing.total_seconds: summed over member training times (renders as a correct "Train min").
+    - timing.epochs_run: 0 (no training happened here).
+    - best_val_dice: None (no validation loop).
+    - backbone / normalization: derived via merge_backbones / merge_normalization — the single
+      source of truth for those strings; never hardcode "mixed" or a backbone string elsewhere.
+
+    ``member_payloads`` is the list of each member's own metrics.json payload (for params /
+    checkpoint size / timing); ``backbones`` and ``normalizations`` are the per-member protocol
+    values (e.g. from src.config.MODEL_SPECS). ``extras`` (e.g. the ``ensemble`` or ``cascade``
+    block) is merged into the payload verbatim.
+    """
+    from src.ensemble.combine import merge_backbones, merge_normalization  # lazy: numpy import
+
+    total_trainable = sum(p.get("params", {}).get("trainable") or 0 for p in member_payloads)
+    total_params = sum(p.get("params", {}).get("total") or 0 for p in member_payloads)
+    total_ckpt_mb = sum(p.get("checkpoint_size_mb") or 0 for p in member_payloads)
+    total_seconds = sum(p.get("timing", {}).get("total_seconds") or 0 for p in member_payloads)
+
+    mean_seen = _mean_over(eval_results, SEEN_SPLITS)
+    mean_unseen = _mean_over(eval_results, UNSEEN_SPLITS)
+    gap = (mean_seen - mean_unseen) if (mean_seen is not None and mean_unseen is not None) else None
+
+    payload = {
+        "model": model_key,
+        "backbone": merge_backbones(backbones),
+        "seed": seed,
+        "normalization": merge_normalization(normalizations),
+        "device_name": device_name,
+        "params": {
+            "total": total_params,
+            "trainable": total_trainable,
+            "trainable_pct": round(100 * total_trainable / total_params, 4) if total_params else None,
+        },
+        "checkpoint_size_mb": round(total_ckpt_mb, 2) if total_ckpt_mb else None,
+        "timing": {"epochs_run": 0, "total_seconds": round(total_seconds, 2)},
+        "best_val_dice": None,
+        "eval": {k: {m: round(v, 6) for m, v in sc.items()} for k, sc in eval_results.items()},
+        "generalization_gap_dice": round(gap, 6) if gap is not None else None,
+    }
+    if extras:
+        payload.update(extras)
+    return payload
 
 
 def _fmt(v, nd: int = 4) -> str:
@@ -245,6 +369,16 @@ def _fmt(v, nd: int = 4) -> str:
     if isinstance(v, float):
         return f"{v:.{nd}f}"
     return str(v)
+
+
+# Cost-table reference model: every "delta" and "cost multiple" column is relative to this
+# model's GPU-s per image. SAM-ViT-H is the strongest single trained model, so a cheaper method
+# reads as a savings and a more expensive one (the cascade) reads as a multiple of the reference.
+COST_REFERENCE_MODEL_DIR = "sam_vit_h"
+
+
+def _drift_marker(e: dict) -> str:
+    return " †" if e.get("accepted_drift") else ""
 
 
 def _agg_table_rows(entries: list[dict]) -> list[str]:
@@ -259,7 +393,29 @@ def _agg_table_rows(entries: list[dict]) -> list[str]:
         tp = f"{e['trainable_params']:,}" if e.get("trainable_params") is not None else "—"
         tm = _fmt(e.get("train_minutes_mean"), 1)
         n = f"{e['n_seeds']} ({', '.join(str(s) for s in e['seeds'])})" if e["seeds"] else "0"
-        out.append(f"| {e['model']} | {n} | {seen} | {unseen} | {gap} | {tp} | {tm} |")
+        out.append(f"| {e['model']}{_drift_marker(e)} | {n} | {seen} | {unseen} | {gap} | {tp} | {tm} |")
+    return out
+
+
+def _cost_table_rows(agg: list[dict]) -> list[str]:
+    """Header + body lines for the inference-cost table. Rows without a recorded
+    infer_gpu_seconds_per_image are omitted — this table only, not the tier tables."""
+    priced = [e for e in agg if e.get("infer_gpu_seconds_per_image_mean") is not None]
+    if not priced:
+        return []
+    ref = next((e for e in priced if e["model_dir"] == COST_REFERENCE_MODEL_DIR), None)
+    ref_cost = ref["infer_gpu_seconds_per_image_mean"] if ref else None
+
+    out = ["| Model | Mean unseen mDice | GPU-s per image | Delta GPU-s vs reference | "
+           "Cost multiple | Unseen Dice per GPU-s |",
+           "|---|---|---|---|---|---|"]
+    for e in priced:
+        cost = e["infer_gpu_seconds_per_image_mean"]
+        delta = f"{cost - ref_cost:+.4f}" if ref_cost is not None else "—"
+        multiple = f"{cost / ref_cost:.2f}x" if ref_cost else "—"
+        dps = _fmt(e.get("unseen_dice_per_gpu_second_mean"), 2)
+        out.append(f"| {e['model']}{_drift_marker(e)} | {_fmt(e.get('mean_unseen_dice_mean'))} | "
+                   f"{_fmt(cost, 4)} | {delta} | {multiple} | {dps} |")
     return out
 
 
@@ -286,6 +442,32 @@ def render_markdown(rows: list[dict], agg: list[dict]) -> str:
     lines += _agg_table_rows(tiers.get("prompt-free", []))
     lines.append("")
 
+    best_single = max(
+        (e for e in tiers.get("prompt-free", []) if e.get("mean_unseen_dice_mean") is not None),
+        key=lambda e: e["mean_unseen_dice_mean"], default=None,
+    )
+    best_note = (f" The best single-model unseen mDice is {best_single['model']} at "
+                f"{_fmt(best_single['mean_unseen_dice_mean'])}."
+                if best_single is not None else "")
+    lines.append(
+        "## Derived methods (combinations of the models above; no ground truth at inference)"
+    )
+    lines.append("")
+    lines.append(
+        "_Ensembles and the box cascade read no ground truth at inference, so they are fair on "
+        "accuracy — but each one costs more compute than any single member, and they are "
+        "combinations of the models above, not a new architecture, so they get their own table "
+        "rather than a rank inside the prompt-free comparison." + best_note + "_"
+    )
+    lines.append("")
+    derived_entries = tiers.get("derived", [])
+    if derived_entries:
+        lines += _agg_table_rows(derived_entries)
+    else:
+        lines.append("_None recorded yet. Run `ensemble_eval.py` / `cascade_eval.py` to "
+                     "populate `results/ens_*` / `results/casc_*`._")
+    lines.append("")
+
     lines.append("## Oracle-box baselines (not trained — GT-derived box prompt; "
                  "upper bound, not a fair peer)")
     lines.append("")
@@ -295,6 +477,19 @@ def render_markdown(rows: list[dict], agg: list[dict]) -> str:
     else:
         lines.append("_None recorded yet. Run `05_benchmark.ipynb`'s zero-shot cell to "
                      "populate `results/vanilla_sam` / `results/vanilla_medsam`._")
+    lines.append("")
+
+    cost_rows = _cost_table_rows(agg)
+    lines.append("## Inference cost (rows that recorded it)")
+    lines.append("")
+    if cost_rows:
+        lines += cost_rows
+        lines.append("")
+        lines.append(f"_Reference model: `{COST_REFERENCE_MODEL_DIR}`. † marks a row with "
+                     f"accepted verification drift (see docs/DECISIONS.md)._")
+    else:
+        lines.append("_None recorded yet. Rows populate once `predict_cache.py` / "
+                     "`ensemble_eval.py` / `cascade_eval.py` write an `inference` block._")
     lines.append("")
 
     lines.append("## Per run (each model × seed)")

@@ -62,6 +62,7 @@ _PROTOCOL_KEYS = ("normalization", "color_jitter")
 _DEFAULT_DRIVE_RESULTS = "/content/drive/MyDrive/msu2026_checkpoints/results"
 _DEFAULT_DRIVE_CHECKPOINTS = "/content/drive/MyDrive/msu2026_checkpoints"
 _DEFAULT_OVERLAY_SPLITS = ("seen_kvasir", "cvc_colondb")
+_DEFAULT_CACHE_ROOT = "cache"
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +161,14 @@ def resolve_normalization(model: str) -> str:
 
 def resolve_color_jitter(model: str) -> dict:
     return dict(_spec(model).color_jitter)   # copy: callers must not mutate the registry
+
+
+def resolve_cache_root(cfg: dict) -> str:
+    """Per-image probability cache root for predict_cache.py / ensemble_eval.py / cascade_eval.py.
+
+    Reads ``cfg["ensemble"]["cache_dir"]``; defaults to ``"cache"`` (gitignored, see
+    docs/PLAN_ENSEMBLE.md Phase 1)."""
+    return str(cfg.get("ensemble", {}).get("cache_dir", _DEFAULT_CACHE_ROOT))
 
 
 def reject_protocol_overrides(cfg: dict) -> None:
@@ -416,4 +425,289 @@ def describe_zeroshot_plan(plan: ZeroShotPlan) -> str:
     if plan.published:
         lines.append("PUBLISHED — re-running requires --allow-published")
     lines.append("=" * 52)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Ensemble registry — ensemble_eval.py (docs/PLAN_ENSEMBLE.md Phase 2/3)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class EnsembleSpec:
+    members: tuple[str, ...]   # model keys from MODEL_SPECS
+    weighting: str             # "uniform" | "fitted"
+    display: str
+
+
+# [DO NOT TOUCH] Pre-registered member sets (docs/DECISIONS.md). Member set A is the largest
+# architectural distance in the study (U-Net vs SAM-ViT-H); member set B is the top three rows
+# of the unseen leaderboard. Each set gets a uniform arm and a fitted arm.
+ENSEMBLE_SPECS: dict[str, EnsembleSpec] = {
+    "ens_unet_samh":        EnsembleSpec(("unet", "sam_lora"), "uniform",
+                                         "Ensemble: U-Net + SAM-ViT-H (uniform)"),
+    "ens_top3":             EnsembleSpec(("unet", "sam_lora", "sam_b"), "uniform",
+                                         "Ensemble: top-3 (uniform)"),
+    "ens_unet_samh_fitted": EnsembleSpec(("unet", "sam_lora"), "fitted",
+                                         "Ensemble: U-Net + SAM-ViT-H (fitted)"),
+    "ens_top3_fitted":      EnsembleSpec(("unet", "sam_lora", "sam_b"), "fitted",
+                                         "Ensemble: top-3 (fitted)"),
+}
+ENSEMBLE_CHOICES = tuple(ENSEMBLE_SPECS)
+
+
+@dataclass
+class EnsemblePlan:
+    """Fully resolved, ready-to-execute description of one ensemble evaluation run."""
+
+    key: str
+    members: tuple[str, ...]
+    member_dirs: tuple[str, ...]
+    member_seeds: tuple[int, ...]
+    weighting: str
+    seed: int
+    threshold: float
+    grid_step: float
+    img_size: int
+    data_root: str
+    cache_root: str
+    local_results_dir: str
+    drive_results_dir: str
+    display: str
+
+
+def build_ensemble_plan(cfg: dict, key: str, seed: int, overrides: Optional[dict] = None) -> EnsemblePlan:
+    """Resolve a merged config dict + ensemble spec key + seed into a concrete EnsemblePlan.
+
+    Ensembles are seed-matched (docs/PLAN_ENSEMBLE.md interpretation 4): every member is read at
+    the same seed as the ensemble itself. ``member_dirs`` resolves through the same
+    ``_checkpoint_name(model, _resolve_backbone(model, cfg))`` pair build_run_plan uses, so
+    ``sam_lora`` maps to the ``sam_vit_h`` results/cache directory.
+    """
+    if key not in ENSEMBLE_SPECS:
+        raise ValueError(f"Unknown ensemble spec '{key}'. Choices: {', '.join(ENSEMBLE_CHOICES)}")
+    spec = ENSEMBLE_SPECS[key]
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
+
+    member_dirs = tuple(_checkpoint_name(m, _resolve_backbone(m, cfg)) for m in spec.members)
+
+    data = cfg.get("data", {}) or {}
+    img_size = int(data.get("img_size", 352))
+    data_root = str(data.get("root", "data/polyp"))
+
+    ens_cfg = cfg.get("ensemble", {}) or {}
+    cache_root = overrides.get("cache_dir") or resolve_cache_root(cfg)
+    grid_step = float(ens_cfg.get("weight_grid_step", 0.05))
+
+    output = cfg.get("output", {}) or {}
+    local_base = output.get("local_results_dir", "results")
+    drive_base = output.get("drive_results_dir", _DEFAULT_DRIVE_RESULTS)
+    seed_leaf = f"{key}/seed{seed}"
+
+    return EnsemblePlan(
+        key=key,
+        members=spec.members,
+        member_dirs=member_dirs,
+        member_seeds=tuple(seed for _ in spec.members),
+        weighting=spec.weighting,
+        seed=int(seed),
+        threshold=0.5,
+        grid_step=grid_step,
+        img_size=img_size,
+        data_root=data_root,
+        cache_root=str(cache_root),
+        local_results_dir=str(Path(local_base) / seed_leaf),
+        drive_results_dir=str(Path(drive_base) / seed_leaf),
+        display=spec.display,
+    )
+
+
+def describe_ensemble_plan(plan: EnsemblePlan) -> str:
+    """Render an EnsemblePlan as a human-readable dry-run summary."""
+    return "\n".join([
+        "Ensemble plan (dry run — nothing executed)",
+        "=" * 52,
+        f"Spec            : {plan.key}  ({plan.display})",
+        f"Members         : {', '.join(plan.members)}",
+        f"Member dirs     : {', '.join(plan.member_dirs)}",
+        f"Seed            : {plan.seed}  (seed-matched across members)",
+        f"Weighting       : {plan.weighting}",
+        f"Threshold       : {plan.threshold}",
+        f"Grid step       : {plan.grid_step}",
+        f"Image size      : {plan.img_size}",
+        f"Data root       : {plan.data_root}",
+        f"Cache root      : {plan.cache_root}",
+        f"Local results   : {plan.local_results_dir}",
+        f"Drive results   : {plan.drive_results_dir}",
+        "=" * 52,
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Cascade registry — cascade_eval.py (docs/PLAN_ENSEMBLE.md Phase 4)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class CascadeSpec:
+    detector: Optional[str]    # model key, or None for the GT-box ceiling row
+    segmenter: str             # a ZEROSHOT_SPECS key
+    box_source: str            # "prediction" | "gt"
+    empty_policy: str          # "zero" | "passthrough"
+    tier: str                  # "derived" | "oracle"
+    display: str
+
+
+def _check_cascade_invariants(key: str, spec: "CascadeSpec") -> None:
+    """The fair-versus-ceiling boundary as a code invariant (docs/PLAN_ENSEMBLE.md Phase 4),
+    in the style reject_protocol_overrides already uses for training protocol."""
+    if spec.box_source == "gt" and spec.tier != "oracle":
+        raise ValueError(
+            f"cascade spec '{key}': box_source='gt' requires tier='oracle', got tier={spec.tier!r}. "
+            f"A GT-derived box is an oracle prompt; it cannot be labeled 'derived' (no ground "
+            f"truth at inference)."
+        )
+    if spec.box_source == "prediction":
+        if spec.detector is None:
+            raise ValueError(
+                f"cascade spec '{key}': box_source='prediction' requires a detector model key."
+            )
+        if spec.tier != "derived":
+            raise ValueError(
+                f"cascade spec '{key}': box_source='prediction' requires tier='derived', got "
+                f"tier={spec.tier!r}."
+            )
+
+
+# [DO NOT TOUCH] The segmenter weights/normalization come from ZEROSHOT_SPECS["vanilla_medsam_minmax"]
+# and cfg["zeroshot"]["checkpoints"] — no second source of MedSAM configuration.
+CASCADE_SPECS: dict[str, CascadeSpec] = {
+    "casc_unet_medsam":         CascadeSpec("unet", "vanilla_medsam_minmax", "prediction", "zero",
+                                            "derived", "Cascade: U-Net box -> MedSAM min-max"),
+    "oracle_casc_gtbox_medsam": CascadeSpec(None, "vanilla_medsam_minmax", "gt", "zero",
+                                            "oracle",
+                                            "Cascade: GT box -> MedSAM min-max (path-matched ceiling)"),
+}
+for _cascade_key, _cascade_spec in CASCADE_SPECS.items():
+    _check_cascade_invariants(_cascade_key, _cascade_spec)
+del _cascade_key, _cascade_spec
+
+CASCADE_CHOICES = tuple(CASCADE_SPECS)
+
+
+@dataclass
+class CascadePlan:
+    """Fully resolved, ready-to-execute description of one cascade evaluation run."""
+
+    key: str
+    detector: Optional[str]
+    detector_dir: Optional[str]
+    segmenter: str
+    segmenter_checkpoint: str
+    segmenter_model_type: str
+    segmenter_normalization: str
+    box_source: str
+    empty_policy: str
+    tier: str
+    seed: int
+    box_padding: int
+    detector_threshold: float
+    img_size: int
+    data_root: str
+    cache_root: str
+    local_results_dir: str
+    drive_results_dir: str
+    display: str
+
+
+def build_cascade_plan(cfg: dict, key: str, seed: Optional[int] = None,
+                       overrides: Optional[dict] = None) -> CascadePlan:
+    """Resolve a merged config dict + cascade spec key into a concrete CascadePlan.
+
+    The ceiling row (``tier == "oracle"``) always uses seed 0, matching every other oracle row
+    (see ZeroShotPlan). A fair, detector-driven row uses the caller's seed (default 42).
+    """
+    if key not in CASCADE_SPECS:
+        raise ValueError(f"Unknown cascade spec '{key}'. Choices: {', '.join(CASCADE_CHOICES)}")
+    spec = CASCADE_SPECS[key]
+    _check_cascade_invariants(key, spec)
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
+
+    resolved_seed = 0 if spec.tier == "oracle" else int(seed if seed is not None else overrides.get("seed", 42))
+
+    detector_dir = None
+    if spec.detector is not None:
+        detector_dir = _checkpoint_name(spec.detector, _resolve_backbone(spec.detector, cfg))
+
+    if spec.segmenter not in ZEROSHOT_SPECS:
+        raise ValueError(f"Unknown segmenter '{spec.segmenter}' for cascade spec '{key}'.")
+    zs_spec = ZEROSHOT_SPECS[spec.segmenter]
+    zs_cfg = cfg.get("zeroshot", {}) or {}
+    checkpoints = zs_cfg.get("checkpoints", {}) or {}
+    try:
+        segmenter_checkpoint = checkpoints[spec.segmenter]
+    except KeyError:
+        raise ValueError(
+            f"No checkpoint filename for segmenter '{spec.segmenter}' under configs/base.yaml -> "
+            f"zeroshot.checkpoints. Add one there."
+        )
+
+    cascade_cfg = cfg.get("cascade", {}) or {}
+    box_padding = int(cascade_cfg.get("box_padding", zs_cfg.get("box_padding", 5)))
+    detector_threshold = float(cascade_cfg.get("detector_threshold", 0.5))
+
+    data = cfg.get("data", {}) or {}
+    img_size = int(data.get("img_size", 352))
+    data_root = str(data.get("root", "data/polyp"))
+
+    cache_root = overrides.get("cache_dir") or resolve_cache_root(cfg)
+
+    output = cfg.get("output", {}) or {}
+    local_base = output.get("local_results_dir", "results")
+    drive_base = output.get("drive_results_dir", _DEFAULT_DRIVE_RESULTS)
+    seed_leaf = f"{key}/seed{resolved_seed}"
+
+    return CascadePlan(
+        key=key,
+        detector=spec.detector,
+        detector_dir=detector_dir,
+        segmenter=spec.segmenter,
+        segmenter_checkpoint=segmenter_checkpoint,
+        segmenter_model_type=zs_spec.model_type,
+        segmenter_normalization=zs_spec.normalization,
+        box_source=spec.box_source,
+        empty_policy=spec.empty_policy,
+        tier=spec.tier,
+        seed=resolved_seed,
+        box_padding=box_padding,
+        detector_threshold=detector_threshold,
+        img_size=img_size,
+        data_root=data_root,
+        cache_root=str(cache_root),
+        local_results_dir=str(Path(local_base) / seed_leaf),
+        drive_results_dir=str(Path(drive_base) / seed_leaf),
+        display=spec.display,
+    )
+
+
+def describe_cascade_plan(plan: CascadePlan) -> str:
+    """Render a CascadePlan as a human-readable dry-run summary."""
+    lines = [
+        "Cascade plan (dry run — nothing executed)",
+        "=" * 52,
+        f"Spec            : {plan.key}  ({plan.display})",
+        f"Tier            : {plan.tier}",
+        f"Detector        : {plan.detector or '(none — GT box)'}",
+        f"Segmenter       : {plan.segmenter}  (backbone: {plan.segmenter_model_type}, "
+        f"normalization: {plan.segmenter_normalization})",
+        f"Box source      : {plan.box_source}",
+        f"Empty policy    : {plan.empty_policy}",
+        f"Box padding     : {plan.box_padding}",
+        f"Detector thresh : {plan.detector_threshold}",
+        f"Seed            : {plan.seed}",
+        f"Image size      : {plan.img_size}",
+        f"Data root       : {plan.data_root}",
+        f"Cache root      : {plan.cache_root}",
+        f"Local results   : {plan.local_results_dir}",
+        f"Drive results   : {plan.drive_results_dir}",
+        "=" * 52,
+    ]
     return "\n".join(lines)

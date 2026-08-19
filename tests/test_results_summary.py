@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from src.results_summary import (
+    COST_REFERENCE_MODEL_DIR,
     MODEL_DISPLAY,
     aggregate_by_model,
     build_summary,
@@ -229,3 +230,123 @@ def test_flatten_tolerates_legacy_payloads_without_normalization():
     assert "normalization" not in payload
     row = flatten("medsam", payload)
     assert row["normalization"] is None
+
+
+# ---------------------------------------------------------------------------
+# Derived tier (ensembles / cascade) — docs/PLAN_ENSEMBLE.md Phase 2
+# ---------------------------------------------------------------------------
+
+def test_derived_and_cascade_keys_have_display_names():
+    for key in ("ens_unet_samh", "ens_unet_samh_fitted", "ens_top3", "ens_top3_fitted",
+                "casc_unet_medsam", "oracle_casc_gtbox_medsam"):
+        assert key in MODEL_DISPLAY
+
+
+def test_derived_and_oracle_cascade_tiers():
+    assert tier_of("ens_top3") == "derived"
+    assert tier_of("casc_unet_medsam") == "derived"
+    assert tier_of("oracle_casc_gtbox_medsam") == "oracle"
+
+
+def test_derived_row_never_appears_in_prompt_free_section(tmp_path):
+    """HONESTY: mirrors the oracle-tier test — a derived row must land in its own table,
+    never ranked into the prompt-free comparison, however it scores."""
+    local = tmp_path / "results"
+    _write_metrics(local, "sam_vit_h", 42, _payload("sam_lora", "vit_h", 42, seen=0.90, unseen=0.79))
+    _write_metrics(local, "ens_top3", 42, _payload("ens_top3", "resnet34+vit_h+vit_b", 42,
+                                                     seen=0.91, unseen=0.85))  # beats every member
+
+    found = discover_metrics([local])
+    rows = [flatten(m, payload) for (m, _s), (payload, _src) in sorted(found.items())]
+    agg = aggregate_by_model(rows)
+    tiers = split_by_tier(agg)
+
+    pf_dirs = {e["model_dir"] for e in tiers["prompt-free"]}
+    derived_dirs = {e["model_dir"] for e in tiers["derived"]}
+    assert pf_dirs == {"sam_vit_h"}
+    assert derived_dirs == {"ens_top3"}
+
+    md = render_markdown(rows, agg)
+    pf_header = "## Prompt-free (trained, mean ± std over seeds)"
+    derived_header = "## Derived methods"
+    pf_section = md.split(pf_header, 1)[1].split(derived_header, 1)[0]
+    assert "Ensemble: top-3" not in pf_section
+
+
+def _inference_payload(model, seed, gpu_s_per_image, n_images=100, accepted_drift=None):
+    payload = _payload(model, "resnet34", seed, seen=0.9, unseen=0.8)
+    payload["inference"] = {
+        "device_name": "A100", "n_images": n_images,
+        "gpu_seconds_total": round(gpu_s_per_image * n_images, 4),
+        "gpu_seconds_per_image": gpu_s_per_image, "batch_size": 8,
+        "accepted_drift": accepted_drift, "source": "predict_cache",
+    }
+    return payload
+
+
+def test_silent_csv_column_loss_survives_both_row_orders(tmp_path):
+    """The real failure mode is a MISSING column, not an exception — DictWriter silently drops
+    a key that appears only on a later row. Assert the column and its value survive whichever
+    row comes first, in both CSV and JSON."""
+    legacy = _payload("unet", "resnet34", 42, seen=0.9, unseen=0.75)   # no inference block
+    with_cost = _inference_payload("sam_lora", 43, gpu_s_per_image=0.035)
+
+    for order_name, (first, second) in [
+        ("legacy_first", (("unet", legacy), ("sam_vit_h", with_cost))),
+        ("cost_first", (("sam_vit_h", with_cost), ("unet", legacy))),
+    ]:
+        local = tmp_path / order_name
+        _write_metrics(local, first[0], 42 if first[0] == "unet" else 43, first[1])
+        _write_metrics(local, second[0], 42 if second[0] == "unet" else 43, second[1])
+        out = tmp_path / f"{order_name}_summary"
+        build_summary([local], out)
+
+        flat_csv = (out / "summary_flat.csv").read_text()
+        assert "infer_gpu_seconds_per_image" in flat_csv.splitlines()[0], order_name
+        assert "0.035" in flat_csv, order_name
+
+        payload = json.loads((out / "summary.json").read_text())
+        gps_values = [r["infer_gpu_seconds_per_image"] for r in payload["runs"]]
+        assert 0.035 in gps_values, order_name
+
+
+def test_discover_metrics_merges_sidecar_and_keeps_inline_inference(tmp_path):
+    local = tmp_path / "results"
+    _write_metrics(local, "unet", 42, _payload("unet", "resnet34", 42, seen=0.9, unseen=0.75))
+    (local / "unet" / "seed42" / "inference.json").write_text(json.dumps(
+        {"n_images": 100, "gpu_seconds_per_image": 0.003, "source": "predict_cache"}))
+
+    inline_payload = _inference_payload("sam_lora", 43, gpu_s_per_image=0.035)
+    _write_metrics(local, "sam_vit_h", 43, inline_payload)
+    (local / "sam_vit_h" / "seed43" / "inference.json").write_text(json.dumps(
+        {"n_images": 999, "gpu_seconds_per_image": 999.0, "source": "predict_cache"}))
+
+    found = discover_metrics([local])
+    unet_payload, _ = found[("unet", 42)]
+    assert unet_payload["inference"]["gpu_seconds_per_image"] == 0.003
+
+    sam_payload, _ = found[("sam_vit_h", 43)]
+    assert sam_payload["inference"]["gpu_seconds_per_image"] == 0.035   # inline wins, sidecar ignored
+
+
+def test_cost_table_lists_only_priced_rows_and_prints_reference_delta(tmp_path):
+    local = tmp_path / "results"
+    _write_metrics(local, COST_REFERENCE_MODEL_DIR, 42,
+                   _inference_payload("sam_lora", 42, gpu_s_per_image=0.035))
+    _write_metrics(local, "unet", 43,
+                   _inference_payload("unet", 43, gpu_s_per_image=0.003))
+    _write_metrics(local, "medsam", 44,
+                   _payload("medsam", "vit_b", 44, seen=0.88, unseen=0.66))   # no inference block
+
+    found = discover_metrics([local])
+    rows = [flatten(m, payload) for (m, _s), (payload, _src) in sorted(found.items())]
+    agg = aggregate_by_model(rows)
+    md = render_markdown(rows, agg)
+
+    cost_header = "## Inference cost"
+    cost_section = md.split(cost_header, 1)[1]
+    next_section = cost_section.split("## Per run", 1)[0]
+    assert "U-Net (ResNet-34)" in next_section
+    assert "SAM-ViT-H + LoRA" in next_section
+    assert "MedSAM-ViT-B + LoRA" not in next_section
+    assert "+0.0000" in next_section or "1.00x" in next_section   # reference row's own delta/multiple
