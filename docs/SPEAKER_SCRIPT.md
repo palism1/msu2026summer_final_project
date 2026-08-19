@@ -10,7 +10,7 @@ Each block names the slide, gives a time budget, and marks chart walkthroughs
 with **[CHART]**. Total spoken time at a normal pace: about 16 minutes. To get
 back under 15, trim the "How they differ" paragraph on slide 5.
 
-Numbers come from `results/summary/SUMMARY.md` (20 runs, A100, seeds 42/43/44).
+Numbers come from `results/summary/SUMMARY.md` (22 runs: 18 trained + 4 oracle; A100, seeds 42/43/44).
 
 ---
 
