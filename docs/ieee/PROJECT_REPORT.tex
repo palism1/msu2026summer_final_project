@@ -23,7 +23,7 @@ mikkopalis@gmail.com}
 \maketitle
 
 \begin{abstract}
-Specialist polyp segmentation networks fit their training distribution tightly and lose accuracy on data from other clinics. This study asks whether the Segment Anything Model (SAM), adapted with Low-Rank Adaptation (LoRA) while its backbone stays frozen, matches a specialist U-Net on the PraNet benchmark and loses less accuracy on the three datasets neither model trained on. Six model variants were trained under one protocol, three seeds each, on one NVIDIA A100, and four untrained oracle-box baselines were evaluated, for 22 runs in total. SAM-ViT-H + LoRA scores highest on the unseen splits (0.806 mean Dice against U-Net's 0.755) with a seen-to-unseen drop about half of U-Net's (0.082 against 0.145), while it trains 830,177 parameters, about 3\% of the 24.4M that U-Net trains end-to-end. The specialist keeps the edge on seen data (0.900) and trains twelve times faster. A controlled three-arm experiment splits MedSAM's 0.100 unseen deficit against SAM-ViT-B into a 0.069 preprocessing artifact in the author's own pipeline and a 0.036 residual for the checkpoint at matched backbone size. With a ground-truth box and its native min-max inputs, untrained MedSAM reaches 0.925 unseen Dice, the highest number in the oracle tier, and the size of that lift (+0.200 against +0.099 for generic SAM) quantifies its prompt dependence. All numbers rest on one benchmark family and three seeds, with no significance test.
+Specialist polyp segmentation networks fit their training distribution tightly and lose accuracy on data from other clinics. This study asks whether the Segment Anything Model (SAM), adapted with Low-Rank Adaptation (LoRA) while its backbone stays frozen, matches a specialist U-Net on the PraNet benchmark and loses less accuracy on the three datasets neither model trained on. Six model variants were trained under one protocol, three seeds each, on one NVIDIA A100, and four untrained oracle-box baselines were evaluated, for 22 runs in total. SAM-ViT-H + LoRA scores highest on the unseen splits (0.806 mean Dice against U-Net's 0.755) with a seen-to-unseen drop about half of U-Net's (0.082 against 0.145), while it trains 830,177 parameters, about 3\% of the 24.4M that U-Net trains end-to-end. The specialist keeps the edge on seen data (0.900) and trains twelve times faster. My first reading was that medical pretraining is a net drag. A controlled three-arm experiment retracted that: it splits MedSAM's 0.100 unseen deficit against SAM-ViT-B into a 0.069 preprocessing artifact in my own pipeline and a 0.036 residual for the checkpoint at matched backbone size. With a ground-truth box and its native min-max inputs, untrained MedSAM reaches 0.925 unseen Dice, the highest number in the oracle tier, and the size of that lift (+0.200 against +0.099 for generic SAM) quantifies its prompt dependence. All numbers rest on one benchmark family and three seeds, with no significance test.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -48,7 +48,7 @@ The contributions are a controlled comparison of three model families (six train
 \section{Literature Review}\label{sec:2}
 \textbf{Specialist polyp segmentation networks.} U-Net \cite{ref1} established the encoder-decoder architecture with skip connections that dominates medical image segmentation. PraNet \cite{ref2} defined the evaluation protocol this study adopts: train on 1,450 images from Kvasir-SEG and CVC-ClinicDB, test on held-out portions of the same two datasets (seen) and on three datasets the model never saw (CVC-ColonDB, ETIS-LaribPolypDB, CVC-300). The split sizes come from the PraNet data release \cite{ref15}; the paper itself describes an 80/10/10 split. PraNet's tables show its specialist baselines lose accuracy on the unseen splits (U-Net falls from 0.818 on Kvasir to 0.512 on ColonDB), which made cross-dataset generalization a standard metric for this task. Polyp-PVT \cite{ref3} pushed specialist accuracy further with a pyramid vision transformer backbone. Both are strong on the benchmark; both are trained end-to-end on a few thousand polyp images, which bounds how much visual diversity they can absorb.
 
-\textbf{Segmentation foundation models.} SAM \cite{ref4} trained a ViT image encoder and a promptable mask decoder on SA-1B, a corpus of 11M images and 1.1B masks. Zero-shot SAM segments natural images well but underperforms on medical imagery, where object boundaries follow tissue contrast rather than natural-image edges. MedSAM \cite{ref5} fine-tuned SAM ViT-B on about 1.57M medical image-mask pairs across ten modalities and reported that it ``ranked in first place on most tasks, surpassing the performance of the U-Net and DeepLabV3+ specialist models'' \cite{ref5}, endoscopy among them, with one structural condition: every training step supplied a bounding-box prompt, and the specialist baselines in that comparison received the box as well. The model was never asked to localize an object on its own.
+\textbf{Segmentation foundation models.} SAM \cite{ref4} trained a ViT image encoder and a promptable mask decoder on SA-1B, a corpus of 11M images and 1.1B masks. Zero-shot SAM segments natural images well but underperforms on medical imagery, where object boundaries follow tissue contrast rather than natural-image edges \cite{ref5}. MedSAM \cite{ref5} fine-tuned SAM ViT-B on about 1.57M medical image-mask pairs across ten modalities and reported that it ``ranked in first place on most tasks, surpassing the performance of the U-Net and DeepLabV3+ specialist models'' \cite{ref5}, endoscopy among them, with one structural condition: every training step supplied a bounding-box prompt, and the specialist baselines in that comparison received the box as well. The model was never asked to localize an object on its own.
 
 \textbf{Parameter-efficient fine-tuning.} LoRA \cite{ref6} freezes a pretrained weight matrix and learns a low-rank update, which cuts trainable parameters by orders of magnitude while it keeps the pretrained representation intact. SAMed \cite{ref7} applied LoRA to a frozen SAM encoder for medical segmentation and is the method this project adapts: LoRA on the attention projections, no prompts at inference. SAMed keeps and fine-tunes SAM's own mask decoder; this project replaces that decoder with a small CNN decoder, which is the one departure from the SAMed recipe.
 
@@ -83,7 +83,7 @@ oracle-box upper bound?
 \subsection{Datasets and protocol}\label{sec:4.1}
 The study follows the PraNet five-split protocol: the same five datasets and the same split sizes as the PraNet data release \cite{ref15}, as configured in \texttt{configs/base.yaml}.
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
 \footnotesize
 \caption{PraNet five-split protocol: datasets, roles, and image counts}
@@ -96,10 +96,10 @@ Kvasir-SEG \cite{ref8} & 900 train / 100 seen test & 1,000 \\
 CVC-ClinicDB \cite{ref9} & 550 train / 62 seen test & 612 \\
 CVC-ColonDB \cite{ref10} & unseen test & 380 \\
 ETIS-LaribPolypDB \cite{ref11} & unseen test & 196 \\
-CVC-300 (EndoScene) \cite{ref12} & unseen test & 60 \\
+CVC-300 (EndoScene \cite{ref12}; 60-image test subset per \cite{ref2,ref15}) & unseen test & 60 \\
 \hline
 \end{tabular}
-\end{table}
+\end{table*}
 
 Training uses 1,450 images. The two seen test splits measure learning ability; the three unseen splits measure generalization. The primary derived metric is the seen-to-unseen drop: mean seen mDice minus mean unseen mDice (the Gap column in the tables).
 
@@ -114,7 +114,7 @@ Training uses 1,450 images. The two seen test splits measure learning ability; t
 \hline
 \textbf{Model} & \textbf{Backbone} & \textbf{Trainable params} & \textbf{Role} \\
 \hline
-U-Net & ResNet-34 encoder (ImageNet init) & 24,436,369 & specialist baseline \\
+U-Net & ResNet-34 encoder, ImageNet init \cite{ref21,ref22} & 24,436,369 & specialist baseline \\
 SAM-ViT-H + LoRA & frozen SAM ViT-H & 830,177 & main contribution \\
 SAM-ViT-B + LoRA & frozen SAM ViT-B & 322,273 & backbone-size control \\
 MedSAM-ViT-B + LoRA & frozen MedSAM ViT-B & 322,273 & pretraining-source arm \\
@@ -367,6 +367,8 @@ The complete per-run table (each model $\times$ seed, all five splits, parameter
 \bibitem{ref18} I. Loshchilov and F. Hutter, ``Decoupled weight decay regularization,'' in \textit{Proc. ICLR}, 2019.
 \bibitem{ref19} P. Iakubovskii, ``Segmentation Models Pytorch,'' GitHub repository, 2019. \url{https://github.com/qubvel/segmentation_models.pytorch}
 \bibitem{ref20} A. Buslaev, V. I. Iglovikov, E. Khvedchenya, A. Parinov, M. Druzhinin, and A. A. Kalinin, ``Albumentations: Fast and flexible image augmentations,'' \textit{Information}, vol. 11, no. 2, Art. no. 125, 2020.
+\bibitem{ref21} K. He, X. Zhang, S. Ren, and J. Sun, ``Deep residual learning for image recognition,'' in \textit{Proc. IEEE CVPR}, 2016, pp. 770--778.
+\bibitem{ref22} J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, ``ImageNet: A large-scale hierarchical image database,'' in \textit{Proc. IEEE CVPR}, 2009, pp. 248--255.
 \end{thebibliography}
 
 \end{document}
