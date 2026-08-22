@@ -51,11 +51,23 @@ We compare:
 │   ├── 01_data_pipeline.ipynb     # Download data, verify splits (run once)
 │   ├── train_colab.ipynb          # Colab wrapper: pick models/seeds in cell 1, runs train.py
 │   ├── 05_benchmark.ipynb         # Compare all trained models side by side
-│   └── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   ├── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
+│   └── 07_report.ipynb            # Render the report figures and tables from results/summary
+├── docs/
+│   ├── PROJECT_REPORT.md          # Final project report (PROJECT_REPORT.docx is generated from it)
+│   ├── FINDINGS.md                # Findings write-up behind the report
+│   ├── MEDSAM_INVESTIGATION.md    # Root-cause analysis of the MedSAM normalization confound
+│   ├── DECISIONS.md               # Design decision log
+│   ├── PROJECT_PLAN.md            # Original plan and checklist
+│   ├── PRESENTATION_OUTLINE.md    # Defense talk plan
+│   ├── SPEAKER_SCRIPT.md          # Defense speaker script and FAQ
+│   └── figures/                   # Figures used by the report and the slides
+├── tests/                     # GPU-free unit tests (pytest tests/)
 ├── train.py                   # CLI training entry point
 ├── evaluate.py                # CLI evaluation (all 5 splits)
 ├── zeroshot_eval.py           # CLI untrained oracle-box baseline evaluator
 ├── aggregate_results.py       # Consolidate results -> results/summary (no GPU, no re-run)
+├── make_figures.py            # Regenerate docs/figures from results/summary
 └── requirements.txt
 ```
 
@@ -125,12 +137,14 @@ python aggregate_results.py
 
 ---
 
-## Work Plan
+## Status
 
-| Phase | Weeks | Deliverable |
+| Deliverable | State | Where |
 |---|---|---|
-| 1 | 1-2 | Data pipeline, splits, metrics (done) |
-| 2 | 3-5 | U-Net baseline + evaluation harness |
-| 3 | 6-8 | SAM-LoRA adaptation |
-| 4 | 9-10 | Full benchmark, ablations, efficiency |
-| 5 | 11-12 | Web demo, final report |
+| Data pipeline, splits, metrics | done | `src/data`, `src/metrics`, `notebooks/01_data_pipeline.ipynb` |
+| U-Net baseline and evaluation harness | done | `src/models/unet.py`, `evaluate.py` |
+| SAM and MedSAM LoRA adaptation, three seeds each | done | `src/models/sam_adapter.py`, `results/summary/` |
+| MedSAM three-arm normalization experiment | done | `docs/MEDSAM_INVESTIGATION.md` |
+| Oracle-box baselines | done | `zeroshot_eval.py` |
+| Final report | done | `docs/PROJECT_REPORT.md` |
+| Ensemble and box cascade (pre-registered) | code and tests on `worktree-ensemble-plan`, GPU pass pending | `docs/PLAN_ENSEMBLE.md` on that branch |
