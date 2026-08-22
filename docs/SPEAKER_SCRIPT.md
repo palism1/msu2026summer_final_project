@@ -399,7 +399,7 @@ location.
 
 **Is the 0.045 difference between SAM-H and SAM-B a pure backbone-size effect?**
 Approximately, and I say so with a caveat. The recipe is held fixed, rank 4 on
-the query and value projections, but the adapter count scales with the
+the merged qkv projection of each encoder block, but the adapter count scales with the
 backbone, 322 thousand against 830 thousand trainable parameters, so adapter
 capacity moves together with size. A strict size claim would need the adapter
 capacity matched across backbones, and I did not run that. Also, 0.045 and the
