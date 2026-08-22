@@ -54,7 +54,8 @@ We compare:
 │   ├── 06_findings.ipynb          # Illustrate the two-tier (prompt-free vs oracle) result
 │   └── 07_report.ipynb            # Render the report figures and tables from results/summary
 ├── docs/
-│   ├── PROJECT_REPORT.md          # Final project report (PROJECT_REPORT.docx is generated from it)
+│   ├── PROJECT_REPORT.md          # Final project report (docx and pdf are generated from it)
+│   ├── ieee/                      # IEEE conference-format version: IEEEtran source, generator, PDF
 │   ├── FINDINGS.md                # Findings write-up behind the report
 │   ├── MEDSAM_INVESTIGATION.md    # Root-cause analysis of the MedSAM normalization confound
 │   ├── DECISIONS.md               # Design decision log
