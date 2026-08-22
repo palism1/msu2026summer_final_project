@@ -73,7 +73,7 @@ absorb.
 **Segmentation foundation models.** SAM [4] trained a ViT image encoder and a promptable mask
 decoder on SA-1B, a corpus of 11M images and 1.1B masks. Zero-shot SAM segments natural images
 well but underperforms on medical imagery, where object boundaries follow tissue contrast
-rather than natural-image edges. MedSAM [5] fine-tuned SAM ViT-B on about 1.57M medical
+rather than natural-image edges [5]. MedSAM [5] fine-tuned SAM ViT-B on about 1.57M medical
 image-mask pairs across ten modalities and reported that it "ranked in first place on most
 tasks, surpassing the performance of the U-Net and DeepLabV3+ specialist models" [5],
 endoscopy among them, with one structural condition: every training step supplied a
@@ -141,7 +141,7 @@ split sizes as the PraNet data release [15], as configured in `configs/base.yaml
 | CVC-ClinicDB [9] | 550 train / 62 seen test | 612 |
 | CVC-ColonDB [10] | unseen test | 380 |
 | ETIS-LaribPolypDB [11] | unseen test | 196 |
-| CVC-300 (EndoScene) [12] | unseen test | 60 |
+| CVC-300 (EndoScene [12]; 60-image test subset per [2, 15]) | unseen test | 60 |
 
 Training uses 1,450 images. The two seen test splits measure learning ability; the three
 unseen splits measure generalization. The primary derived metric is the seen-to-unseen
@@ -151,7 +151,7 @@ drop: mean seen mDice minus mean unseen mDice (the Gap column in the tables).
 
 | Model | Backbone | Trainable params | Role |
 |---|---|---|---|
-| U-Net | ResNet-34 encoder (ImageNet init) | 24,436,369 | specialist baseline |
+| U-Net | ResNet-34 encoder, ImageNet init [21, 22] | 24,436,369 | specialist baseline |
 | SAM-ViT-H + LoRA | frozen SAM ViT-H | 830,177 | main contribution |
 | SAM-ViT-B + LoRA | frozen SAM ViT-B | 322,273 | backbone-size control |
 | MedSAM-ViT-B + LoRA | frozen MedSAM ViT-B | 322,273 | pretraining-source arm |
@@ -553,6 +553,12 @@ https://github.com/qubvel/segmentation_models.pytorch
 [20] A. Buslaev, V. I. Iglovikov, E. Khvedchenya, A. Parinov, M. Druzhinin, and A. A. Kalinin,
 "Albumentations: Fast and flexible image augmentations," *Information*, vol. 11, no. 2,
 Art. no. 125, 2020.
+
+[21] K. He, X. Zhang, S. Ren, and J. Sun, "Deep residual learning for image recognition," in
+*Proc. IEEE CVPR*, 2016, pp. 770–778.
+
+[22] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, "ImageNet: A large-scale
+hierarchical image database," in *Proc. IEEE CVPR*, 2009, pp. 248–255.
 
 ## 10. Appendices
 
