@@ -496,7 +496,7 @@ reverse attention network for polyp segmentation," in *Proc. MICCAI*, 2020, pp. 
 with pyramid vision transformers," *CAAI Artificial Intelligence Research*, vol. 2, Art. no.
 9150015, 2023.
 
-[4] A. Kirillov et al., "Segment Anything," in *Proc. IEEE/CVF ICCV*, 2023, pp. 3992–4003.
+[4] A. Kirillov et al., "Segment Anything," in *Proc. IEEE/CVF ICCV*, 2023, pp. 4015–4026.
 
 [5] J. Ma, Y. He, F. Li, L. Han, C. You, and B. Wang, "Segment anything in medical images,"
 *Nature Communications*, vol. 15, Art. no. 654, 2024.
@@ -527,7 +527,7 @@ images," *Journal of Healthcare Engineering*, vol. 2017, Art. no. 4037190, 2017.
 (CVC-300 / EndoScene)
 
 [13] D.-P. Fan, M.-M. Cheng, Y. Liu, T. Li, and A. Borji, "Structure-measure: A new way to
-evaluate foreground maps," in *Proc. IEEE ICCV*, 2017, pp. 4558–4567.
+evaluate foreground maps," in *Proc. IEEE ICCV*, 2017, pp. 4548–4557.
 
 [14] D.-P. Fan, C. Gong, Y. Cao, B. Ren, M.-M. Cheng, and A. Borji, "Enhanced-alignment
 measure for binary foreground map evaluation," in *Proc. IJCAI*, 2018, pp. 698–704.
