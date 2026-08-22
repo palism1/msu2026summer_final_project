@@ -419,12 +419,55 @@ oracle tier has one run per baseline and remains an upper bound, not a peer. Tra
 is asymmetric in a way that matters to some deployments (U-Net: 10 min, 98 MB; SAM-H: 120
 min, 2.5 GB).
 
-**Future work.** Four directions, in the order I would take them. Evaluate on a benchmark
-family outside PraNet's five datasets, since that is the limitation that bounds the claim
-most. Pair MedSAM with a learned box proposer to test whether its 0.925 oracle ceiling is
-reachable without ground truth; the cascade is cheap because both halves already exist.
-Probe color sensitivity with the grayscale-replication experiment already designed. Test
-larger LoRA ranks and target modules.
+**Future work.** Four directions, in the order I would take them. The first is already
+designed and scaffolded; the other three are open.
+
+*1. An ensemble decision system.* The six trained models make different errors, and the
+per-split table in Section 6.2 shows where: U-Net wins ClinicDB, SAM-ViT-H wins every unseen
+split, and MedSAM with a box beats both. The next experiment combines them at inference
+without reading any ground truth. It has two parts. A **flat ensemble** averages the
+probability maps of several trained members before the 0.5 threshold; every model already
+scores on the same 352 × 352 grid, so the maps average directly. A **box cascade** uses
+U-Net's prompt-free mask to derive a bounding box, then hands that box to vanilla MedSAM under
+min-max normalization. This tests whether the 0.925 oracle ceiling in Section 6.4 is
+reachable with a learned localizer instead of ground truth.
+
+The design is pre-registered in `docs/PLAN_ENSEMBLE.md` so that the result cannot be tuned
+after the fact. Two member sets are fixed in advance: set A is U-Net plus SAM-ViT-H, the
+largest architectural distance in the study; set B is the top three prompt-free rows
+(SAM-ViT-H, SAM-ViT-B, U-Net). Each set runs with uniform weights and with weights fitted on
+a grid. Weight fitting uses only the first contiguous half of each seen test split, in sorted
+path order, and holds out the second half. The split is contiguous rather than interleaved
+because CVC-ClinicDB frames come from video sequences, and an interleaved split would put
+near-duplicate frames on both sides. The unseen splits stay untouched as the primary
+endpoint. The decision threshold stays at 0.5, since a fitted threshold would be a second
+confound. Ensembles and the cascade report in a third tier, `derived`, separate from both the
+trained models and the oracle baselines: they are fair, because they read no ground truth at
+inference, but they are not peers of a single architecture in a table that asks which
+backbone generalizes better.
+
+The expected ranges are written down before the run, so a bug is visible. A uniform ensemble
+should land between 0.77 and 0.83 unseen mDice; a value below 0.75 signals a defect, and a
+value below SAM-ViT-H's 0.806 is not a defect, because U-Net saturates its sigmoid harder than
+the LoRA models and can pull a uniform average toward itself. Fitted weights should move the
+uniform result by −0.005 to +0.015. The members share training data and loss, so their
+errors correlate, and I expect a gain of about 0.01 to 0.03 over the best single model rather
+than a large one. The cascade should land between 0.75 and 0.88: MedSAM with a correct box
+scores about 0.92, so a detector that produces a usable box on a fraction *f* of images gives
+roughly 0.92 *f*. Detection caps the cascade, and that cap is the number I most want to
+measure. Cost is small on the compute side, about one to one and a half A100-hours to cache
+the per-image probability maps for nine runs; the rest runs on a CPU from the cache. The
+cache, combination, and cascade code with its GPU-free tests already exists on a feature
+branch and is waiting on the GPU pass.
+
+*2. A second benchmark family.* Evaluate outside PraNet's five datasets, since that is the
+limitation that bounds the claim most.
+
+*3. Color sensitivity.* Probe it with the grayscale-replication experiment already designed
+in `docs/MEDSAM_INVESTIGATION.md`.
+
+*4. Adapter capacity.* Test larger LoRA ranks and separate Q and V targets, which would also
+close the remaining difference from the SAMed recipe.
 
 ## 9. References
 
