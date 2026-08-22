@@ -3,7 +3,7 @@ SAM + LoRA adapter (Phase 3).
 
 Architecture:
   - Frozen SAM image encoder (ViT-H by default)
-  - LoRA injected into Q and V projections of every transformer block
+  - LoRA wraps the merged qkv projection of every encoder attention block (one shared low-rank update across Q, K, V; SAM stores them as one Linear)
   - Lightweight CNN mask decoder (replaces SAM's prompt-based decoder)
   - Only LoRA params + decoder are trained → ~1-3% of total parameters
 
@@ -121,7 +121,7 @@ class SAMLoRA(nn.Module):
         # Interpolate to our training resolution so x + pos_embed doesn't shape-mismatch.
         self._resize_pos_embed(img_size)
 
-        # inject LoRA into Q and V projections of each attention block
+        # inject LoRA into the merged qkv projection of each attention block (SAM has no separate q_proj/v_proj)
         self._inject_lora(lora_r, lora_alpha, lora_dropout)
 
         embed_dim = next(

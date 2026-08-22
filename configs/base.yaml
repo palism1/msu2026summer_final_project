@@ -40,7 +40,7 @@ sam:
   lora_r: 4
   lora_alpha: 8
   lora_dropout: 0.1
-  target_modules:      # which SAM attention projections get LoRA
+  target_modules:      # documentation only: not read by src/ or train.py; the adapter wraps the merged qkv Linear
     - q_proj
     - v_proj
 
