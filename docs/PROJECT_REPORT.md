@@ -6,7 +6,9 @@ last_updated: 2026-08-22
 # LoRA-Adapted Foundation Models vs. Specialist U-Net for Cross-Dataset Polyp Segmentation
 
 **Project Report, Research Method in Computing**
+
 **MSU Summer 2026, Master's Final Project**
+
 Mikko Palis
 
 ---
