@@ -27,10 +27,10 @@ I trained six model variants under one shared protocol, three random seeds each,
 NVIDIA A100 GPU, and evaluated four untrained oracle-box baselines, for 22 runs in total.
 Four findings came out of it:
 
-1. **SAM-ViT-H + LoRA generalizes best.** It reaches 0.806 mean Dice on the three unseen
+1. **SAM-ViT-H + LoRA scores highest on the unseen splits.** It reaches 0.806 mean Dice on the three unseen
    datasets against U-Net's 0.755, and its seen-to-unseen drop (0.082) is about half of
-   U-Net's (0.145). It trains 830,177 parameters, about 3% of the 24.4M that U-Net trains
-   from scratch.
+   U-Net's (0.145). It trains 830,177 parameters, about 3% of the 24.4M that the ImageNet-initialized
+   U-Net trains end-to-end.
 2. **The specialist still wins at home.** U-Net posts the best seen-data score (0.900 mean
    Dice) and trains twelve times faster.
 3. **A measured diagnosis of MedSAM's deficit.** MedSAM's apparent collapse (0.661
@@ -42,8 +42,8 @@ Four findings came out of it:
 4. **Prompt dependence quantified.** With its two contracts honored (a box prompt and
    min-max inputs), untrained MedSAM posts the best unseen number in the study (0.925).
    A ground-truth box lifts SAM-ViT-H by +0.099 but lifts corrected MedSAM by +0.200.
-   MedSAM is a specialized model, and it pays for the specialization exactly when the
-   box is taken away.
+   MedSAM is a specialized model, and the pattern is consistent with an encoder that
+   relies on the box for localization and pays when the box is taken away.
 
 The contributions are a controlled comparison of four model families under one protocol,
 two matched pairings that separate the pretraining source from the backbone size, a
@@ -68,7 +68,8 @@ absorb.
 decoder on SA-1B, a corpus of 11M images and 1.1B masks. Zero-shot SAM segments natural images
 well but underperforms on medical imagery, where object boundaries follow tissue contrast
 rather than natural-image edges. MedSAM [5] fine-tuned SAM ViT-B on about 1.57M medical
-image-mask pairs across ten modalities and reported specialist-level accuracy on endoscopy,
+image-mask pairs across ten modalities and reported accuracy above per-modality specialist
+U-Net and DeepLabV3+ baselines, endoscopy included [5],
 with one structural condition: every training step supplied a bounding-box prompt. The model
 was never asked to localize an object on its own.
 
@@ -76,14 +77,16 @@ was never asked to localize an object on its own.
 low-rank update, which cuts trainable parameters by orders of magnitude while it keeps the
 pretrained representation intact. SAMed [7] applied LoRA to a frozen SAM encoder for medical
 segmentation and is the method this project adapts: LoRA on the attention projections, a
-lightweight convolutional decoder, no prompts at inference.
+no prompts at inference. SAMed keeps and fine-tunes SAM's own mask decoder; this project
+replaces that decoder with a small CNN decoder, which is the one departure from the SAMed
+recipe.
 
 **The unanswered question.** The surveyed work reports benchmark accuracy. None of it says
 whether LoRA adaptation of a foundation model buys *generalization*, measured on the same
 seen/unseen protocol the specialists were built on, under one training protocol, with the
 cost of each option recorded. Two published claims also sit in tension: MedSAM reports
-beating specialists on endoscopy, and the PraNet protocol is exactly the setting where that
-claim can be tested without a prompt oracle. Nobody had run that test. This study does.
+beating its specialist baselines on endoscopy, and the PraNet protocol is exactly the setting where that
+claim can be tested without a prompt oracle. I did not find a published run of that test. This study runs it.
 
 ## 3. Problem Formulation
 
@@ -120,7 +123,8 @@ scientific finding. That is a methods lesson that reaches past this task.
 
 ### 4.1 Datasets and protocol
 
-The study follows the PraNet five-split protocol exactly.
+The study follows the PraNet five-split protocol: the same five datasets and the same
+split sizes, as configured in `configs/base.yaml`.
 
 | Dataset | Role | Images |
 |---|---|---|
@@ -145,9 +149,12 @@ minus mean unseen mDice.
 | MedSAM min-max / ctrl | frozen MedSAM ViT-B | 322,273 | normalization experiment arms |
 | Vanilla SAM / MedSAM (4 variants) | frozen, untrained | 0 | oracle-box upper bound |
 
-The LoRA models follow SAMed: the ViT encoder is frozen, rank-4 LoRA (alpha 8, dropout 0.1)
-is injected into the attention query and value projections, and a lightweight CNN decoder
-reads a mask from the encoder features with no prompt at inference. SAM-ViT-B + LoRA shares
+The LoRA models adapt the SAMed recipe: the ViT encoder is frozen, rank-4 LoRA (alpha 8,
+dropout 0.1) wraps the merged query/key/value projection of every encoder attention block
+(one shared low-rank update across Q, K, and V, since SAM's encoder stores them as one
+linear layer), and a small CNN decoder reads a mask from the encoder features with no
+prompt at inference. SAMed targets Q and V separately and keeps SAM's mask decoder; both
+differences are noted in Section 7. SAM-ViT-B + LoRA shares
 MedSAM's backbone size but keeps generic SAM weights, so the pair separates backbone capacity
 from pretraining source. Two caveats bound these pairings, and I want them stated before the results rather
 than after. The LoRA parameter count scales with the backbone (830K on ViT-H against 322K on
@@ -163,7 +170,7 @@ All trained models share one protocol: 352×352 inputs, batch size 4, AdamW (lea
 early stopping at patience 8, checkpoint selection by best validation Dice, three seeds
 (42, 43, 44), one NVIDIA A100-SXM4-40GB. Augmentation: flips, rotation, and color jitter via
 Albumentations. Input normalization is bound to the model key: ImageNet standardization for
-SAM and U-Net (this reproduces SAM's native `preprocess`), per-image min-max [0,1] for the
+SAM and U-Net (the same mean and std that SAM's native `preprocess` applies), per-image min-max [0,1] for the
 corrected MedSAM arms (MedSAM's native contract).
 
 ### 4.4 Evaluation
@@ -180,8 +187,8 @@ ground-truth mask (5 px padding): vanilla SAM ViT-H, vanilla SAM ViT-B, vanilla 
 ImageNet normalization, and vanilla MedSAM under its own min-max normalization. The
 ground-truth box reveals the polyp's location, so these numbers form an upper bound. I keep
 them in a separate tier and never rank them against the trained models. The box protocol is
-standard in the medical-SAM literature, and I confirmed it with my professor before the
-final runs.
+standard in the medical-SAM literature, and I confirmed it with my advisor before the
+final runs (`docs/PROJECT_PLAN.md`).
 
 ### 4.6 The MedSAM three-arm experiment
 
@@ -206,8 +213,9 @@ augmentation confound is `medsam` → `medsam_ctrl`.
 
 ### 5.1 Architecture of the codebase
 
-The pipeline is config-driven. `configs/base.yaml` holds shared hyperparameters;
-`configs/run.yaml` selects the model, seed, and output paths. `train.py` trains any model key
+The pipeline is config-driven. `configs/base.yaml` holds the defaults and the per-model
+blocks; `configs/run.yaml` holds the values the study actually used (batch size, epochs,
+learning rate, patience) and selects the model, seed, and output paths. `train.py` trains any model key
 under the identical protocol; `evaluate.py` scores all five splits; `zeroshot_eval.py` runs
 the untrained oracle-box baselines; `aggregate_results.py` consolidates every run's
 `metrics.json` into `results/summary/` without a GPU. Model construction lives in
@@ -243,7 +251,7 @@ box is an oracle: it hands the model the location. The tradeoff was between drop
 untrained tier, which loses the upper bound, and reporting it next to trained models, which
 invites a false comparison. I took a third route: keep the oracle tier in a separate table,
 flag the negative seen-to-unseen gap as the sign that these numbers track split difficulty
-rather than learning, and get my professor's sign-off on the box protocol before the final
+rather than learning, and get my advisor's sign-off on the box protocol before the final
 runs.
 
 **Compute discipline.** Colab sessions are preemptible and quota-bound. The trainer restores
@@ -251,7 +259,7 @@ finished runs from Drive and skips them, so a lost session costs only the run in
 Early stopping kept several 50-epoch budgets to 28 to 49 actual epochs.
 
 **Testing without a GPU.** Prompt-derivation math and the config/aggregation layer are
-torch-free and covered by 24 unit tests (`pytest tests/`), so I could check the logic that
+torch-free and covered by 70 unit tests (`pytest tests/`), so I could check the logic that
 defines the experiment on my laptop before spending GPU time.
 
 ## 6. Results and Analysis
@@ -270,7 +278,7 @@ Means ± standard deviation over seeds 42, 43, 44; one A100.
 | MedSAM + LoRA (ImageNet norm, jitter control) | 0.815 ± 0.001 | 0.655 ± 0.002 | 0.160 ± 0.002 | 322,273 | 349 | 30 |
 
 **RQ1 (seen).** U-Net wins at home: 0.900 against SAM-ViT-H's 0.887. The specialist fits the
-training distribution tightest, including the best ClinicDB score of any model (0.897).
+training distribution tightest, including the best ClinicDB score of any trained model (0.897).
 
 **RQ2 (unseen).** SAM-ViT-H + LoRA leads every unseen split and holds 0.806 mean unseen Dice
 against U-Net's 0.755. Its seen-to-unseen drop is 0.082, about half of U-Net's 0.145. Even
@@ -308,17 +316,19 @@ Four controlled comparisons, each changing one factor:
 | Comparison | Factor changed | Unseen mDice effect |
 |---|---|---|
 | SAM-ViT-H → SAM-ViT-B | backbone shrinks (SAM weights fixed) | 0.806 → 0.761 (**−0.045**) |
-| medsam → medsam_ctrl | jitter off (ImageNet norm fixed) | 0.661 → 0.655 (**−0.006**) |
+| medsam → medsam_ctrl | brightness/contrast jitter off (ImageNet norm fixed) | 0.661 → 0.655 (**−0.006**) |
 | medsam_ctrl → medsam_minmax | normalization corrected (jitter-controlled) | 0.655 → 0.725 (**+0.069**) |
 | SAM-ViT-B → MedSAM-minmax | pretraining source (backbone and preprocessing matched) | 0.761 → 0.725 (**−0.036**) |
 
 Of MedSAM's original 0.100 unseen deficit against SAM-ViT-B, 0.069 was my preprocessing bug
 and 0.036 is the residual effect of the MedSAM checkpoint at matched size. That residual and
-the backbone effect (0.045) are close, and each carries a seed spread near 0.005, so the two
-read as comparable in size rather than strictly ordered. The checkpoint effect itself bundles
+the backbone effect (0.045) are close, and the seed spreads behind them run from 0.004 (the
+ViT-B arms) to 0.011 (SAM-ViT-H), so the two read as comparable in size rather than strictly
+ordered. The three effects sum to the deficit only with the jitter term included
+(−0.006 + 0.069 + 0.036 = 0.100). The checkpoint effect itself bundles
 MedSAM's medical training data with its box-prompted training objective; Section 6.4 points to
-the objective as the likely driver. The jitter confound was negligible (0.006), which validates
-the three-arm design. On this evidence I retracted the earlier claim that medical pretraining is a net drag and
+the objective as the likely driver. The jitter confound was small (0.006), which shows
+the augmentation interaction did not drive the result. On this evidence I retracted the earlier claim that medical pretraining is a net drag and
 accounts for most of the deficit.
 
 ### 6.4 Oracle-box upper bound (RQ5)
@@ -335,34 +345,37 @@ Untrained, prompted with a ground-truth-derived box; a separate tier, not a fair
 I read two things from this table. First, the normalization bug replicates with zero
 training: the same MedSAM
 weights score 0.845 unseen under ImageNet inputs and 0.925 under their own min-max (+0.080).
-Second, with both of its contracts honored, vanilla MedSAM is the strongest model in the
-study. The negative gaps show that this tier measures split difficulty given a
+Second, with both of its contracts honored, vanilla MedSAM is the strongest entry in the
+oracle tier. The negative gaps show that this tier measures split difficulty given a
 location hint, not generalization: a genuinely generalizing model should not score higher on
 unseen data than seen data. This is the prompt dependence in numbers: the untrained box-prompted model
 beats its own trained prompt-free version by +0.099 for SAM-ViT-H (0.806 → 0.905) and by
 +0.200 for corrected MedSAM (0.725 → 0.925). Two conditions change between those numbers, the
 box arrives and the LoRA training is absent, so each lift reads as the value of location
-information net of what training added. MedSAM's fine-tuning always supplied a box, so its
-encoder never learned to localize; it pays exactly when the box is taken away.
+information net of what training added. MedSAM's fine-tuning always supplied a box. The study measures the lift, not the
+mechanism, but the size of the lift is consistent with an encoder that relies on the box
+for localization and pays when the box is taken away.
 
 ## 7. Discussion
 
-**The adaptation trade is real and favorable off-distribution.** The frozen SAM backbone
-carries visual priors that 1,450 polyp images cannot teach a from-scratch CNN, and rank-4
-LoRA is enough to point those priors at the task. The result pattern (specialist wins at
+**The adaptation trade is real and favorable off-distribution, on this benchmark family.**
+The frozen SAM backbone
+carries visual priors beyond what an ImageNet-initialized CNN picks up from 1,450 polyp
+images, and the result is consistent with rank-4 LoRA being enough to point those priors at
+the task. The result pattern (specialist wins at
 home, adapter wins away) matches the deployment question clinics actually face, and the
-gap metric puts the trade in one line: 3% of the trainable parameters buys half the
-generalization drop.
+gap metric puts the trade in one line: 3% of the trainable parameters comes with half
+the generalization drop.
 
 **MedSAM is specialized, not weak.** The finding I learned the most from is negative
-in form. MedSAM's published claim (specialist-level endoscopy accuracy) and my measured
+in form. MedSAM's published claim (above its specialist baselines on endoscopy) and my measured
 result (last on every split) are both correct. They measure different contracts. MedSAM
 with a box and min-max inputs posts the best unseen number here (0.925). MedSAM without
 the box loses the most, because its fine-tuning let the encoder offload localization to
 the prompt. A practitioner choosing a model should ask which contract the deployment honors. If no
 localizer supplies a box at inference, I would pick prompt-free adaptation of generic SAM
 over medical-pretrained MedSAM at the same size; the 0.036 residual in Section 6.3 is the
-reason.
+reason, with the caveat that it rests on one benchmark family and three seeds.
 
 **Methods lesson: preprocessing contracts are results.** A one-line normalization
 difference produced a 0.069 Dice artifact that I first read as a scientific finding
@@ -371,15 +384,19 @@ naive fix was itself confounded through the interaction between min-max normaliz
 and photometric augmentation. The pattern I would reuse is to bind preprocessing to the
 model key in code, keep the published arm, and give the corrected arms separate keys.
 
-**Relation to prior work.** The result extends SAMed's finding (LoRA on frozen SAM works
-for medical segmentation) with the measurement SAMed did not make: cross-dataset
-generalization under the specialists' own protocol. It also gives PraNet's seen/unseen
+**Relation to prior work.** The result builds on SAMed's approach (LoRA on a frozen SAM
+encoder for medical segmentation) and adds the measurement SAMed did not make:
+cross-dataset generalization under the specialists' own protocol. Two parts of the recipe
+differ here, the CNN decoder in place of SAM's mask decoder and LoRA on the merged qkv
+projection instead of Q and V separately, so the comparison is to SAMed's approach rather
+than a replication of it. It also gives PraNet's seen/unseen
 framing a new use, separating model classes rather than ranking specialist variants.
 
 ## 8. Conclusion
 
-A frozen SAM ViT-H backbone with an 830K-parameter LoRA adapter beats a 24.4M-parameter
-specialist U-Net on unseen polyp datasets (0.806 vs 0.755 mean Dice) and halves the
+A frozen SAM ViT-H backbone with an 830K-parameter LoRA adapter scores higher than a
+24.4M-parameter ImageNet-initialized U-Net on the three unseen PraNet datasets (0.806 vs
+0.755 mean Dice, three seeds, no significance test) and halves the
 seen-to-unseen drop (0.082 vs 0.145), while the specialist keeps the edge on seen data
 and in training cost. Controlled ablations attribute MedSAM's apparent collapse to three
 measured causes: a 0.069 preprocessing artifact in my own pipeline, a 0.036 residual for
@@ -394,8 +411,9 @@ from the backbone size, plus a measured preprocessing effect, via matched arms. 
 retraction pattern for a preprocessing confound. (4) A reproducible pipeline: config-driven
 trainer, GPU-free tests, mechanical results aggregation.
 
-**Limitations.** I want to be direct about what these numbers do not cover. All five splits
-come from PraNet's datasets, so the results do not speak to colonoscopy data under other
+**Limitations.** I want to be direct about what these numbers do not cover. No
+significance test was run; the seed spreads in Section 6.1 are the only uncertainty
+measure. All five splits come from PraNet's datasets, so the results do not speak to colonoscopy data under other
 equipment or protocols. Three seeds show the spread is real, but the sample is small. The
 oracle tier has one run per baseline and remains an upper bound, not a peer. Training cost
 is asymmetric in a way that matters to some deployments (U-Net: 10 min, 98 MB; SAM-H: 120
@@ -466,7 +484,7 @@ measure for binary foreground map evaluation," in *Proc. IJCAI*, 2018, pp. 698�
 | Loss | Dice + BCE |
 | Epoch budget | 50, early stop patience 8 |
 | Checkpoint selection | best validation Dice |
-| LoRA | r = 4, alpha = 8, dropout 0.1, query and value projections |
+| LoRA | r = 4, alpha = 8, dropout 0.1, merged qkv projection of each encoder attention block |
 | Seeds | 42, 43, 44 |
 | Hardware | NVIDIA A100-SXM4-40GB (Google Colab) |
 | Oracle prompt | ground-truth bounding box, 5 px padding |
@@ -480,7 +498,8 @@ Source code: GitHub repository (this project). Entry points: `train.py` (trainin
 `results/summary/SUMMARY.md`, `summary_flat.csv`, `summary_by_model.csv`. Supporting
 documents: `docs/FINDINGS.md` (findings write-up), `docs/MEDSAM_INVESTIGATION.md`
 (hypothesis-driven root-cause analysis), `docs/DECISIONS.md` (design decision log),
-`docs/PRESENTATION_OUTLINE.md` (talk plan). Tests: `pytest tests/` (24 GPU-free tests).
+`docs/PRESENTATION_OUTLINE.md` (talk plan). Tests: `pytest tests/` (70 GPU-free tests, plus 8 transform tests that run only where
+Albumentations is installed).
 
 ### Appendix C: Per-run results
 
